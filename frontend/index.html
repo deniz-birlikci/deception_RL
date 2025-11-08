@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Secret Hitler LLM - Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>Secret Hitler LLM</h1>
+      <div class="players-info" id="players-info">
+        Loading players...
+      </div>
+      <div class="header-spacer"></div>
+    </header>
+
+    <main class="layout">
+      <section class="left-pane">
+        <div class="panel chat-panel">
+          <div class="panel-header">Table Discussion & Game Log</div>
+          <div id="chat-list" class="chat-list"></div>
+        </div>
+      </section>
+
+      <section class="right-pane">
+        <div class="panel boards-panel">
+          <div class="panel-header">Policy Tracks</div>
+          <div class="boards">
+            <div class="board liberal">
+              <div class="board-title">LIBERAL</div>
+              <div id="liberal-track" class="track"></div>
+            </div>
+            <div class="board fascist">
+              <div class="board-title">FASCIST</div>
+              <div id="fascist-track" class="track"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

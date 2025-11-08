@@ -1,0 +1,77 @@
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111827; background: #0f172a; }
+
+#app { display: flex; flex-direction: column; height: 100%; }
+.app-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #111827; color: #E5E7EB; border-bottom: 1px solid #1f2937; }
+.app-header h1 { font-size: 18px; margin: 0; }
+.header-spacer { width: 100px; } /* Balance the header layout */
+.players-info { display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap; justify-content: center; flex: 1; }
+.player-card { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; }
+.player-card.you-player { border: 2px solid #3b82f6; border-radius: 8px; padding: 6px; background: rgba(59, 130, 246, 0.1); }
+.player-name { font-weight: 600; color: #e5e7eb; }
+.player-role { font-size: 11px; opacity: 0.7; color: #9ca3af; }
+.player-title { font-size: 10px; color: #fbbf24; font-weight: 600; }
+
+.game-button { 
+  background: #2563eb; 
+  color: white; 
+  border: none; 
+  padding: 8px 16px; 
+  border-radius: 6px; 
+  font-weight: 600; 
+  font-size: 13px; 
+  cursor: pointer; 
+  transition: all 0.2s ease;
+}
+.game-button:hover:not(:disabled) { 
+  background: #1d4ed8; 
+  transform: translateY(-1px);
+}
+.game-button:disabled { 
+  background: #6b7280; 
+  cursor: not-allowed; 
+  transform: none;
+}
+
+.layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; padding: 16px; height: calc(100% - 50px); }
+
+.left-pane, .right-pane { display: flex; flex-direction: column; gap: 16px; min-height: 0; height: 100%; }
+
+.panel { background: #0b1220; border: 1px solid #1f2937; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.panel-header { padding: 10px 12px; font-weight: 600; color: #93c5fd; background: #0b1220; border-bottom: 1px solid #1f2937; }
+
+.chat-list { padding: 14px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto; flex: 1; }
+
+.message-container { display: flex; flex-direction: column; gap: 4px; }
+.message-container .chat-meta { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
+
+.chat-item { max-width: 80%; padding: 10px 12px; border-radius: 14px; line-height: 1.3; color: #e5e7eb; }
+.chat-item.speaker { background: #2563eb; align-self: flex-start; border-bottom-left-radius: 4px; }
+.chat-item.answer { background: #374151; align-self: flex-end; border-bottom-right-radius: 4px; }
+.chat-item.you { background: transparent; border: 2px dashed #4b5563; align-self: flex-start; border-bottom-left-radius: 4px; color: #9ca3af; }
+.chat-item.event { background: #0e223f; align-self: flex-end; border-bottom-right-radius: 4px; border: 1px solid #1f3a5b; color: #dbeafe; }
+
+/* Align metadata with message bubbles */
+.message-container:has(.chat-item.speaker) .chat-meta,
+.message-container:has(.chat-item.you) .chat-meta { align-self: flex-start; }
+.message-container:has(.chat-item.answer) .chat-meta,
+.message-container:has(.chat-item.event) .chat-meta { align-self: flex-end; }
+
+/* removed standalone events list */
+
+.boards-panel { flex: 1; }
+.boards { display: grid; grid-template-rows: 1fr 1fr; gap: 16px; padding: 12px; }
+.board { background: #0c1528; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; }
+.board-title { color: #e5e7eb; font-weight: 600; margin-bottom: 8px; letter-spacing: 1px; }
+
+.track { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.track .slot { aspect-ratio: 3 / 4; border-radius: 6px; border: 2px dashed #1f2937; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 12px; background-size: cover; background-position: center; background-repeat: no-repeat; }
+.track .slot.filled { border-style: solid; border-color: #374151; }
+.track.liberal .slot.filled { background-image: url('./media/liberal-card.png'); }
+.track.fascist .slot.filled { background-image: url('./media/facist-card.png'); }
+
+/* Scrollbars */
+.chat-list::-webkit-scrollbar, .events-list::-webkit-scrollbar { width: 10px; }
+.chat-list::-webkit-scrollbar-thumb, .events-list::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 10px; }
+
+@media (max-width: 1024px) { .layout { grid-template-columns: 1fr; } .chat-list { height: 35vh; } .events-list { height: 25vh; } }
