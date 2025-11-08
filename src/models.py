@@ -145,16 +145,28 @@ class PresidentPickChancellorEventPublic(BaseModel):
     president_id: str
     chancellor_id: str
 
+    def __str__(self) -> str:
+        return f"President {self.president_id} nominated {self.chancellor_id} as Chancellor"
+
 
 class VoteChancellorYesNoEventPublic(BaseModel):
     voter_id: str
     chancellor_nominee_id: str
     vote: bool
 
+    def __str__(self) -> str:
+        vote_str = "YES" if self.vote else "NO"
+        return f"{self.voter_id} voted {vote_str} on {self.chancellor_nominee_id}"
+
 
 class ChooseAgentToVoteOutEventPublic(BaseModel):
     voter_id: str
     nominated_agent_id: str | None
+
+    def __str__(self) -> str:
+        if self.nominated_agent_id:
+            return f"{self.voter_id} nominated {self.nominated_agent_id} to be voted out"
+        return f"{self.voter_id} chose not to nominate anyone to be voted out"
 
 
 class AskAgentIfWantsToSpeakEventPublic(BaseModel):
@@ -162,17 +174,29 @@ class AskAgentIfWantsToSpeakEventPublic(BaseModel):
     question_or_statement: str | None
     ask_directed_question_to_agent_id: str | None
 
+    def __str__(self) -> str:
+        if self.ask_directed_question_to_agent_id:
+            return f"{self.agent_id} asked {self.ask_directed_question_to_agent_id}: \"{self.question_or_statement}\""
+        return f"{self.agent_id} said: \"{self.question_or_statement}\""
+
 
 class AgentResponseToQuestioningEventPublic(BaseModel):
     agent_id: str
     in_response_to_agent_id: str
     response: str
 
+    def __str__(self) -> str:
+        return f"{self.agent_id} responded to {self.in_response_to_agent_id}: \"{self.response}\""
+
 
 class PresidentChooseCardToDiscardEventPrivate(BaseModel):
     president_id: str
     cards_drawn: list[PolicyCard]
     card_discarded: PolicyCard
+
+    def __str__(self) -> str:
+        cards_str = ", ".join([c.value.upper() for c in self.cards_drawn])
+        return f"You drew 3 cards: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
 
 
 class ChancellorReceivePoliciesEventPrivate(BaseModel):
@@ -181,7 +205,17 @@ class ChancellorReceivePoliciesEventPrivate(BaseModel):
     cards_received: list[PolicyCard]
     card_discarded: PolicyCard
 
+    def __str__(self) -> str:
+        cards_str = ", ".join([c.value.upper() for c in self.cards_received])
+        return f"You received 2 cards from President {self.president_id_received_from}: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
+
 
 class ChancellorPlayPolicyEventPublic(BaseModel):
     chancellor_id: str | None
     card_played: PolicyCard
+
+    def __str__(self) -> str:
+        policy_str = "FASCIST" if self.card_played == PolicyCard.FASCIST else "LIBERAL"
+        if self.chancellor_id is None:
+            return f"[AUTO-PLAY] A {policy_str} policy was automatically played (3 failed elections)"
+        return f"Chancellor {self.chancellor_id} played a {policy_str} policy"
