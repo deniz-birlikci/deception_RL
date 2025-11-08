@@ -9,11 +9,11 @@ def main():
     deck = Deck()
 
     ai_models: list[AIModel | None] = [
-        AIModel.OPENAI_GPT_5_MINI,
-        AIModel.OPENAI_GPT_5_MINI,
-        AIModel.OPENAI_GPT_5_MINI,
-        AIModel.OPENAI_GPT_5_MINI,
-        AIModel.OPENAI_GPT_5_MINI,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
     ]
 
     result = api.create(deck=deck, ai_models=ai_models, log_file="game_log.txt")

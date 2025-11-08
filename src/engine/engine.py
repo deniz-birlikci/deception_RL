@@ -56,7 +56,7 @@ class Engine:
         self.log_file = log_file
 
         shuffled_roles = random.sample(ROLES, len(ROLES))
-        agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
+        agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
         agents = [
             Agent(agent_id=aid, role=role, ai_model=model)
             for aid, role, model in zip(agent_ids, shuffled_roles, ai_models)
