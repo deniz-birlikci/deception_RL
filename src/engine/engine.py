@@ -1,210 +1,534 @@
+import asyncio
 import random
-import time
 import uuid
+from asyncio import Queue
+from typing import cast
+import json
 from src.models import (
     Agent,
     AgentRole,
     AIModel,
     PolicyCard,
+    Backend,
     PresidentPickChancellorEventPublic,
     VoteChancellorYesNoEventPublic,
-    ChooseAgentToVoteOutEventPublic,
     AskAgentIfWantsToSpeakEventPublic,
     AgentResponseToQuestioningEventPublic,
     PresidentChooseCardToDiscardEventPrivate,
     ChancellorReceivePoliciesEventPrivate,
     ChancellorPlayPolicyEventPublic,
-    MessageHistory,
-    UserInput,
     PresidentPickChancellorTool,
     VoteChancellorYesNoTool,
     PresidentChooseCardToDiscardTool,
     ChancellorPlayPolicyTool,
     AskAgentIfWantsToSpeakTool,
     AgentResponseToQuestionTool,
-    Backend,
+    UserInput,
+    ToolFeedback,
+    ToolResult,
+    EngineEvent,
 )
+from src.engine.protocol import ModelInput, ToolCallTarget, TerminalState
+from src.agent import BaseAgent
 from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
-from src.env import settings
+from src.engine.external_agent_response_parser import ExternalAgentResponseParser
+from src.models import Tools
+from src.engine.prompts import get_base_game_rules_prompt
+from src.tools import OPENAI_TOOLS
+
+ROLES = [
+    AgentRole.HITLER,
+    AgentRole.FASCIST,
+    AgentRole.LIBERAL,
+    AgentRole.LIBERAL,
+    AgentRole.LIBERAL,
+]
 
 
 class Engine:
     def __init__(
         self,
         deck: Deck,
-        fascist_policies_to_win: int = 6,
-        liberal_policies_to_win: int = 5,
+        ai_models: list[AIModel | None],
+        fascist_policies_to_win: int,
+        liberal_policies_to_win: int,
+        log_file: str | None = None,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
         self.hitler_election_threshold = fascist_policies_to_win // 2
+        self.log_file = log_file
 
-        self.agents_by_id: dict[str, Agent] = {}
-        self.president_rotation: list[str] = []
-        self.current_president_id: str | None = None
+        shuffled_roles = random.sample(ROLES, len(ROLES))
+        agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
+        agents = [
+            Agent(agent_id=aid, role=role, ai_model=model)
+            for aid, role, model in zip(agent_ids, shuffled_roles, ai_models)
+        ]
+
+        self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
+        self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
+        self.current_president_idx: int = 0
         self.current_chancellor_id: str | None = None
         self.fascist_policies_played: int = 0
         self.liberal_policies_played: int = 0
+        self.failed_election_tracker: int = 0
+        self.event_counter: int = 0
+        self.public_events: list = []
+        self.private_events_by_agent: dict[str, list] = {aid: [] for aid in agent_ids}
 
-        self.public_events: list[
-            PresidentPickChancellorEventPublic
-            | VoteChancellorYesNoEventPublic
-            | ChooseAgentToVoteOutEventPublic
-            | AskAgentIfWantsToSpeakEventPublic
-            | AgentResponseToQuestioningEventPublic
-            | ChancellorPlayPolicyEventPublic
-        ] = []
+        self.ai_agents: dict[str, BaseAgent] = {}
+        self.msg_history: dict[str, list] = {aid: [] for aid in agent_ids}
+        for aid, agent in self.agents_by_id.items():
+            if agent.ai_model:
+                self.ai_agents[aid] = AgentRegistry.create_agent(
+                    backend=Backend.OPENAI, ai_model=agent.ai_model
+                )
 
-        self.private_events_by_agent: dict[
-            str,
-            list[
-                PresidentChooseCardToDiscardEventPrivate
-                | ChancellorReceivePoliciesEventPrivate
-            ],
-        ] = {}
 
-    def create(
-        self,
-        ai_models: list[AIModel | None],
-    ) -> None:
-        roles = [
-            AgentRole.HITLER,
-            AgentRole.FASCIST,
-            AgentRole.LIBERAL,
-            AgentRole.LIBERAL,
-            AgentRole.LIBERAL,
-        ]
-
-        shuffled_roles = random.sample(roles, len(roles))
-
-        agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
-
-        agents = [
-            Agent(agent_id=agent_id, role=role, ai_model=ai_model)
-            for agent_id, role, ai_model in zip(agent_ids, shuffled_roles, ai_models)
-        ]
-
-        self.agents_by_id = {agent.agent_id: agent for agent in agents}
-
-        for agent_id in agent_ids:
-            self.private_events_by_agent[agent_id] = []
-
-        self.president_rotation = random.sample(agent_ids, len(agent_ids))
-
-        self.current_president_id = random.choice(agent_ids)
-        self.current_chancellor_id = None
-
-    def _now_ms(self) -> str:
-        return str(int(time.time() * 1000))
-
-    def _make_user_input(self, text: str) -> UserInput:
-        return UserInput(history_type="user-input", timestamp=self._now_ms(), user_message=text)
-
-    def _get_agent_backend(self) -> Backend:
-        # Currently only OpenAI is wired.
-        return Backend.OPENAI
-
-    def _create_llm_agent_for(self, agent: Agent):
-        return AgentRegistry.create_agent(
-            backend=self._get_agent_backend(),
-            ai_model=agent.ai_model,
+    def _generate_terminal_state(self) -> TerminalState:
+        # TODO: check if I've won, populate it with the correct terminal state
+        return TerminalState(
+            reward=1.0 if self._get_winners() else 0.0,
+            have_won=self._get_winners(),
         )
 
-    def _prompt_agent_for_speak_intent(
-        self,
-        agent: Agent,
-        other_agent_ids: list[str],
-    ) -> AskAgentIfWantsToSpeakTool | None:
-        """Ask an agent if they want to speak and optionally pose a directed question.
 
-        Returns the hydrated AskAgentIfWantsToSpeakTool if they choose to speak, else None.
-        """
-        llm = self._create_llm_agent_for(agent)
-        prompt = (
-            "Discussion phase: If you want to speak, call the ask-agent-if-wants-to-speak tool. "
-            "You may optionally include a 'question_or_statement' to say publicly, and/or set "
-            "'ask_directed_question_to_agent_id' to one of these agents: "
-            f"{other_agent_ids}. If you do not want to speak, do nothing."
-        )
-        history: list[MessageHistory] = [self._make_user_input(prompt)]
-        assistant = llm.generate_response(history)
-        for tool in assistant.hydrated_tool_calls:
-            if isinstance(tool, AskAgentIfWantsToSpeakTool):
-                # Consider any such tool call as intent to speak.
-                return tool
-        return None
+    async def run(self, input_queue: Queue, output_queue: Queue) -> None:
+        while not self._is_game_over():
+            president_id = self.president_rotation[self.current_president_idx]
 
-    def _prompt_agent_for_direct_answer(
-        self,
-        target: Agent,
-        asked_by_id: str,
-        question_text: str | None,
-    ) -> AgentResponseToQuestionTool | None:
-        """Prompt a target agent to answer a directed question via the agent-response tool."""
-        llm = self._create_llm_agent_for(target)
-        prompt = (
-            "You were asked a direct question in the discussion phase. "
-            f"Question from agent {asked_by_id}: '{question_text or ''}'. "
-            "Respond ONLY by calling the agent-response-to-question-tool with your 'response' string."
-        )
-        history: list[MessageHistory] = [self._make_user_input(prompt)]
-        assistant = llm.generate_response(history)
-        for tool in assistant.hydrated_tool_calls:
-            if isinstance(tool, AgentResponseToQuestionTool):
-                return tool
-        return None
+            eligible_chancellor_ids = [
+                aid
+                for aid in self.agents_by_id.keys()
+                if aid != president_id and aid != self.current_chancellor_id
+            ]
 
-    def run_discussion_round(self) -> None:
-        """Run one discussion round:
-        - Ask all agents if they want to speak (and optionally direct a question to someone)
-        - Randomize the order of agents who said yes
-        - For each, create an AskAgentIfWantsToSpeakEventPublic
-          - If a directed question is present, prompt that target and log an AgentResponseToQuestioningEventPublic
-        """
-        agent_ids = list(self.agents_by_id.keys())
-
-        # 1) Ask intent to speak
-        speak_intents: list[tuple[str, AskAgentIfWantsToSpeakTool]] = []
-        for agent_id in agent_ids:
-            agent = self.agents_by_id[agent_id]
-            others = [aid for aid in agent_ids if aid != agent_id]
-            intent = self._prompt_agent_for_speak_intent(agent, others)
-            if intent is not None:
-                speak_intents.append((agent_id, intent))
-
-        if not speak_intents:
-            return
-
-        # 2) Randomize order
-        random.shuffle(speak_intents)
-
-        # 3) Execute in order
-        for speaker_id, intent_tool in speak_intents:
-            # Log the speaker's public event (question/statement and optional target)
+            tool = cast(
+                PresidentPickChancellorTool,
+                await self._get_tool(
+                    president_id,
+                    "Nominate a Chancellor.",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["president-pick-chancellor"],
+                    eligible_agent_ids=eligible_chancellor_ids,
+                ),
+            )
+            chancellor_id = tool.agent_id
             self.public_events.append(
-                AskAgentIfWantsToSpeakEventPublic(
-                    agent_id=speaker_id,
-                    question_or_statement=intent_tool.question_or_statement,
-                    ask_directed_question_to_agent_id=intent_tool.ask_directed_question_to_agent_id,
+                PresidentPickChancellorEventPublic(
+                    event_order_counter=self.event_counter,
+                    president_id=president_id,
+                    chancellor_id=chancellor_id,
                 )
             )
+            self.event_counter += 1
+            await self._log_state_to_file()
 
-            # If there's a directed question, prompt the target for a response
-            target_id = intent_tool.ask_directed_question_to_agent_id
-            if target_id and target_id in self.agents_by_id:
-                target_agent = self.agents_by_id[target_id]
-                response_tool = self._prompt_agent_for_direct_answer(
-                    target=target_agent,
-                    asked_by_id=speaker_id,
-                    question_text=intent_tool.question_or_statement,
+            await self._discourse(input_queue, output_queue)
+            await self._log_state_to_file()
+
+            if not await self._vote(chancellor_id, input_queue, output_queue):
+                self.failed_election_tracker += 1
+                await self._log_state_to_file()
+
+                if self.failed_election_tracker >= 3:
+                    self._handle_failed_election()
+                    await self._log_state_to_file()
+
+                self.current_president_idx = (self.current_president_idx + 1) % len(
+                    self.president_rotation
                 )
-                if response_tool is not None:
-                    self.public_events.append(
-                        AgentResponseToQuestioningEventPublic(
-                            agent_id=target_id,
-                            in_response_to_agent_id=speaker_id,
-                            response=response_tool.response,
-                        )
+                await self._log_state_to_file()
+                continue
+
+            self.failed_election_tracker = 0
+            self.current_chancellor_id = chancellor_id
+            await self._log_state_to_file()
+
+            cards = self.deck.draw(3)
+            tool = cast(
+                PresidentChooseCardToDiscardTool,
+                await self._get_tool(
+                    president_id,
+                    f"Cards: {cards}. Discard index (0-2).",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["president-choose-card-to-discard"],
+                ),
+            )
+            idx = tool.card_index
+            discarded = cards.pop(idx)
+            self.deck.add_to_discard(discarded)
+
+            self.private_events_by_agent[president_id].append(
+                PresidentChooseCardToDiscardEventPrivate(
+                    event_order_counter=self.event_counter,
+                    president_id=president_id,
+                    cards_drawn=cards + [discarded],
+                    card_discarded=discarded,
+                )
+            )
+            self.event_counter += 1
+            await self._log_state_to_file()
+
+            tool = cast(
+                ChancellorPlayPolicyTool,
+                await self._get_tool(
+                    chancellor_id,
+                    f"Cards: {cards}. Play index (0-1).",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["chancellor-play-policy"],
+                ),
+            )
+            idx = tool.card_index
+            played = cards[idx]
+            discarded_by_chancellor = cards[1 - idx]
+            self.deck.add_to_discard(discarded_by_chancellor)
+
+            self.private_events_by_agent[chancellor_id].append(
+                ChancellorReceivePoliciesEventPrivate(
+                    event_order_counter=self.event_counter,
+                    chancellor_id=chancellor_id,
+                    president_id_received_from=president_id,
+                    cards_received=cards,
+                    card_discarded=discarded_by_chancellor,
+                )
+            )
+            self.event_counter += 1
+            self.public_events.append(
+                ChancellorPlayPolicyEventPublic(
+                    event_order_counter=self.event_counter,
+                    chancellor_id=chancellor_id,
+                    card_played=played,
+                )
+            )
+            self.event_counter += 1
+            await self._log_state_to_file()
+
+            if played == PolicyCard.FASCIST:
+                self.fascist_policies_played += 1
+            else:
+                self.liberal_policies_played += 1
+
+            await self._discourse(input_queue, output_queue)
+            await self._log_state_to_file()
+
+            self.current_president_idx = (self.current_president_idx + 1) % len(
+                self.president_rotation
+            )
+            await self._log_state_to_file()
+
+        # TODO: implement the end logic here...
+        # Game is over, generate the terminal state
+        terminal_state = self._generate_terminal_state()
+        final_model_input = ModelInput(
+            # TODO: the messages here should be the full history of the game
+            # ideally... or the model can store the history itself...
+            messages=[],
+            tool_call=None,
+            terminal_state=terminal_state,
+        )
+        await output_queue.put(final_model_input)
+
+    async def _get_tool(
+        self,
+        agent_id: str,
+        prompt_guidance: str,
+        input_queue: Queue,
+        output_queue: Queue,
+        allowed_tools: list[str] | None = None,
+        eligible_agent_ids: list[str] | None = None,
+    ) -> Tools:
+        agent = self.agents_by_id[agent_id]
+        full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
+
+        if agent.ai_model is None:
+            tools = (
+                [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
+                if allowed_tools
+                else OPENAI_TOOLS
+            )
+
+            # Assert that there is only one tool
+            assert len(tools) == 1
+
+            # Create the tool call target
+            tool_call_target = ToolCallTarget(
+                name=tools[0]["function"]["name"],
+                openai_schema=tools[0],
+            )
+
+            # Create the new model input
+            model_input = ModelInput(
+                # TODO: fix the messages here...
+                messages=[{"role": "user", "content": full_prompt}],
+                tool_call=tool_call_target,
+                terminal_state=None,
+            )
+
+            # Place the model input back on the queue
+            await output_queue.put(model_input)
+            response = ExternalAgentResponseParser.parse(await input_queue.get())
+        else:
+            user_input = UserInput(
+                history_type="user-input",
+                user_message=full_prompt,
+                timestamp=str(uuid.uuid4()),
+            )
+            self.msg_history[agent_id].append(user_input)
+            response = await self.ai_agents[agent_id].generate_response(
+                self.msg_history[agent_id],
+                allowed_tools=allowed_tools,
+                eligible_agent_ids=eligible_agent_ids,
+            )
+            self.msg_history[agent_id].append(response)
+
+        feedback = ToolFeedback(
+            history_type="tool-feedback",
+            tool_call_results=[
+                ToolResult(
+                    tool_call_id=response.tool_calls[0].tool_call_id,
+                    tool_name=response.tool_calls[0].tool_name,
+                    output="OK",
+                )
+            ],
+            timestamp=str(uuid.uuid4()),
+        )
+        self.msg_history[agent_id].append(feedback)
+
+        return response.hydrated_tool_calls[0]
+
+    async def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
+        # Parallelize asking all agents if they want to speak
+        ask_tasks = [
+            self._get_tool(
+                aid,
+                "Speak? (question/statement or null)",
+                input_queue,
+                output_queue,
+                allowed_tools=["ask-agent-if-wants-to-speak"],
+                eligible_agent_ids=[other_aid for other_aid in self.agents_by_id if other_aid != aid],
+            )
+            for aid in self.agents_by_id
+        ]
+        tools = await asyncio.gather(*ask_tasks)
+
+        speakers = []
+        for aid, tool in zip(self.agents_by_id.keys(), tools):
+            tool = cast(AskAgentIfWantsToSpeakTool, tool)
+            if tool.question_or_statement:
+                speakers.append((aid, tool))
+
+        random.shuffle(speakers)
+
+        for aid, tool in speakers:
+            self.public_events.append(
+                AskAgentIfWantsToSpeakEventPublic(
+                    event_order_counter=self.event_counter,
+                    agent_id=aid,
+                    question_or_statement=tool.question_or_statement,
+                    ask_directed_question_to_agent_id=tool.ask_directed_question_to_agent_id,
+                )
+            )
+            self.event_counter += 1
+
+            if tool.ask_directed_question_to_agent_id:
+                target = tool.ask_directed_question_to_agent_id
+                resp = cast(
+                    AgentResponseToQuestionTool,
+                    await self._get_tool(
+                        target,
+                        f"Asked: {tool.question_or_statement}. Respond.",
+                        input_queue,
+                        output_queue,
+                        allowed_tools=["agent-response-to-question-tool"],
+                    ),
+                )
+                self.public_events.append(
+                    AgentResponseToQuestioningEventPublic(
+                        event_order_counter=self.event_counter,
+                        agent_id=target,
+                        in_response_to_agent_id=aid,
+                        response=resp.response,
                     )
+                )
+                self.event_counter += 1
+
+    def _handle_failed_election(self) -> None:
+        top_card = self.deck.draw(1)[0]
+        self.public_events.append(
+            ChancellorPlayPolicyEventPublic(
+                event_order_counter=self.event_counter,
+                chancellor_id=None,
+                card_played=top_card,
+            )
+        )
+        self.event_counter += 1
+        if top_card == PolicyCard.FASCIST:
+            self.fascist_policies_played += 1
+        else:
+            self.liberal_policies_played += 1
+        self.failed_election_tracker = 0
+
+    async def _vote(
+        self, chancellor_id: str, input_queue: Queue, output_queue: Queue
+    ) -> bool:
+        # Parallelize all votes
+        vote_tasks = [
+            self._get_tool(
+                aid,
+                f"Vote on Chancellor {chancellor_id}? (true/false)",
+                input_queue,
+                output_queue,
+                allowed_tools=["vote-chancellor-yes-no"],
+            )
+            for aid in self.agents_by_id
+        ]
+        tools = await asyncio.gather(*vote_tasks)
+
+        votes = []
+        for aid, tool in zip(self.agents_by_id.keys(), tools):
+            tool = cast(VoteChancellorYesNoTool, tool)
+            votes.append(tool.choice)
+            self.public_events.append(
+                VoteChancellorYesNoEventPublic(
+                    event_order_counter=self.event_counter,
+                    voter_id=aid,
+                    chancellor_nominee_id=chancellor_id,
+                    vote=tool.choice,
+                )
+            )
+            self.event_counter += 1
+        return sum(votes) > len(votes) // 2
+
+    def _is_game_over(self) -> bool:
+        return (
+            self.fascist_policies_played >= self.fascist_policies_to_win
+            or self.liberal_policies_played >= self.liberal_policies_to_win
+            or self._hitler_elected()
+        )
+
+    def _hitler_elected(self) -> bool:
+        if self.fascist_policies_played < self.hitler_election_threshold:
+            return False
+        if self.current_chancellor_id is None:
+            return False
+        return self.agents_by_id[self.current_chancellor_id].role == AgentRole.HITLER
+
+    def _get_winners(self) -> list[Agent]:
+        if (
+            self.fascist_policies_played >= self.fascist_policies_to_win
+            or self._hitler_elected()
+        ):
+            return [
+                agent
+                for agent in self.agents_by_id.values()
+                if agent.role in [AgentRole.HITLER, AgentRole.FASCIST]
+            ]
+        else:
+            return [
+                agent
+                for agent in self.agents_by_id.values()
+                if agent.role == AgentRole.LIBERAL
+            ]
+
+    def _build_prompt_for_agent(self, agent_id: str, action_prompt: str) -> str:
+        agent = self.agents_by_id[agent_id]
+
+        rules_prompt = get_base_game_rules_prompt(
+            num_players=len(self.agents_by_id),
+            fascist_policies_to_win=self.fascist_policies_to_win,
+            liberal_policies_to_win=self.liberal_policies_to_win,
+            hitler_election_threshold=self.hitler_election_threshold,
+            num_liberal_cards=self.deck.total_liberal_cards,
+            num_fascist_cards=self.deck.total_fascist_cards,
+        )
+
+        game_state = f"""{rules_prompt}
+        What is Private:
+        - The reasoning tokens your produce in your response
+        - The text you produce in your response
+        - You are highly encouraged to use your reasoning to think privately about the best way to win the game
+        - Tool calls that trigger private events are private (PresidentChooseCardToDiscardTool, ChancellorPlayPolicyTool with the card you choose to discard)
+    
+        What is Public:
+        - Tool calls that trigger public events are public (PresidentPickChancellorTool, VoteChancellorYesNoTool, ChancellorPlayPolicyTool with the card you choose to play, ChooseAgentToVoteOutTool, AskAgentIfWantsToSpeakTool, AgentResponseToQuestionTool)
+        - Note: referencing some other agent in your AskAgentIfWantsToSpeakTool or responding in AgentResponseToQuestionTool are completely public and should not be used for private communication
+
+        === GAME STATE ===
+        Your Agent ID: {agent_id}
+        Your Role: {agent.role}
+        Current President: {self.president_rotation[self.current_president_idx]}
+        Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else 'None'}
+        Fascist Policies Played: {self.fascist_policies_played}/{self.fascist_policies_to_win}
+        Liberal Policies Played: {self.liberal_policies_played}/{self.liberal_policies_to_win}
+        Failed Elections: {self.failed_election_tracker}/3 (at 3, top policy is played automatically)
+
+        All Agents: {list(self.agents_by_id.keys())}
+        """
+
+        all_events: list[EngineEvent] = (
+            self.public_events + self.private_events_by_agent[agent_id]
+        )
+        all_events_sorted = sorted(all_events, key=lambda e: e.event_order_counter)
+
+        events_str = "\n=== ALL EVENTS ===\n"
+        if all_events_sorted:
+            for i, event in enumerate(all_events_sorted, 1):
+                events_str += f"{i}. {event}\n"
+        else:
+            events_str += "No events yet.\n"
+
+        fascist_info_str = ""
+        fascist_ids = [
+            aid
+            for aid, a in self.agents_by_id.items()
+            if a.role in [AgentRole.FASCIST, AgentRole.HITLER] and aid != agent_id
+        ]
+        if agent.role == AgentRole.FASCIST:
+            fascist_info_str = f"\n=== FELLOW FASCISTS ===\n{fascist_ids}\n"
+
+        action_str = f"\n=== ACTION REQUIRED ===\n{action_prompt}\n"
+        return game_state + events_str + fascist_info_str + action_str
+
+    async def _log_state_to_file(self) -> None:
+        if not self.log_file:
+            return
+
+        state = {
+            "agents": {
+                aid: {"role": agent.role.value, "ai_model": agent.ai_model}
+                for aid, agent in self.agents_by_id.items()
+            },
+            "president_rotation": self.president_rotation,
+            "current_president_idx": self.current_president_idx,
+            "current_chancellor_id": self.current_chancellor_id,
+            "fascist_policies_played": self.fascist_policies_played,
+            "liberal_policies_played": self.liberal_policies_played,
+            "failed_election_tracker": self.failed_election_tracker,
+            "public_events": [str(e) for e in self.public_events],
+            "private_events_by_agent": {
+                aid: [str(e) for e in events]
+                for aid, events in self.private_events_by_agent.items()
+            },
+        }
+
+        # Use asyncio to write to file without blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            self._write_log,
+            state,
+        )
+
+    def _write_log(self, state: dict) -> None:
+        """Helper method to write log synchronously in executor."""
+        with open(self.log_file, "a") as f:
+            f.write("=" * 60 + "\n")
+            f.write(json.dumps(state, indent=2) + "\n")
+

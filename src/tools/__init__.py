@@ -1,5 +1,3 @@
-from .openai import TOOLS as OPENAI_TOOLS
+from .tools import generate_tools
 
-__all__ = [
-    "OPENAI_TOOLS",
-]
+__all__ = ["generate_tools"]

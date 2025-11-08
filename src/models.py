@@ -8,6 +8,9 @@ class AIModel(str, Enum):
     OPENAI_GPT_5_MINI = "gpt-5-mini-2025-08-07"
     OPENAI_GPT_5_NANO = "gpt-5-nano-2025-08-07"
     OPENAI_GPT_4_1 = "gpt-4.1-2025-04-14"
+    OPENROUTER_GPT_OSS_120b = "openai/gpt-oss-120b:exacto"
+    OPENROUTER_KIMI_K2 = "moonshotai/kimi-k2-0905:exacto"
+    OPENROUTER_QWEN3_THINKING = "qwen/qwen3-235b-a22b-thinking-2507"
 
 
 class Backend(str, Enum):
@@ -141,47 +144,87 @@ class PolicyCard(str, Enum):
     FASCIST = "fascist"
 
 
-class PresidentPickChancellorEventPublic(BaseModel):
+class EngineEvent(BaseModel):
+    event_order_counter: int
+
+
+class PresidentPickChancellorEventPublic(EngineEvent):
     president_id: str
     chancellor_id: str
 
+    def __str__(self) -> str:
+        return f"President {self.president_id} nominated {self.chancellor_id} as Chancellor"
 
-class VoteChancellorYesNoEventPublic(BaseModel):
+
+class VoteChancellorYesNoEventPublic(EngineEvent):
     voter_id: str
     chancellor_nominee_id: str
     vote: bool
 
+    def __str__(self) -> str:
+        vote_str = "YES" if self.vote else "NO"
+        return f"{self.voter_id} voted {vote_str} on {self.chancellor_nominee_id}"
 
-class ChooseAgentToVoteOutEventPublic(BaseModel):
+
+class ChooseAgentToVoteOutEventPublic(EngineEvent):
     voter_id: str
     nominated_agent_id: str | None
 
+    def __str__(self) -> str:
+        if self.nominated_agent_id:
+            return (
+                f"{self.voter_id} nominated {self.nominated_agent_id} to be voted out"
+            )
+        return f"{self.voter_id} chose not to nominate anyone to be voted out"
 
-class AskAgentIfWantsToSpeakEventPublic(BaseModel):
+
+class AskAgentIfWantsToSpeakEventPublic(EngineEvent):
     agent_id: str
     question_or_statement: str | None
     ask_directed_question_to_agent_id: str | None
 
+    def __str__(self) -> str:
+        if self.ask_directed_question_to_agent_id:
+            return f'{self.agent_id} asked {self.ask_directed_question_to_agent_id}: "{self.question_or_statement}"'
+        return f'{self.agent_id} said: "{self.question_or_statement}"'
 
-class AgentResponseToQuestioningEventPublic(BaseModel):
+
+class AgentResponseToQuestioningEventPublic(EngineEvent):
     agent_id: str
     in_response_to_agent_id: str
     response: str
 
+    def __str__(self) -> str:
+        return f'{self.agent_id} responded to {self.in_response_to_agent_id}: "{self.response}"'
 
-class PresidentChooseCardToDiscardEventPrivate(BaseModel):
+
+class PresidentChooseCardToDiscardEventPrivate(EngineEvent):
     president_id: str
     cards_drawn: list[PolicyCard]
     card_discarded: PolicyCard
 
+    def __str__(self) -> str:
+        cards_str = ", ".join([c.value.upper() for c in self.cards_drawn])
+        return f"You drew 3 cards: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
 
-class ChancellorReceivePoliciesEventPrivate(BaseModel):
+
+class ChancellorReceivePoliciesEventPrivate(EngineEvent):
     chancellor_id: str
     president_id_received_from: str
     cards_received: list[PolicyCard]
     card_discarded: PolicyCard
 
+    def __str__(self) -> str:
+        cards_str = ", ".join([c.value.upper() for c in self.cards_received])
+        return f"You received 2 cards from President {self.president_id_received_from}: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
 
-class ChancellorPlayPolicyEventPublic(BaseModel):
-    chancellor_id: str
+
+class ChancellorPlayPolicyEventPublic(EngineEvent):
+    chancellor_id: str | None
     card_played: PolicyCard
+
+    def __str__(self) -> str:
+        policy_str = "FASCIST" if self.card_played == PolicyCard.FASCIST else "LIBERAL"
+        if self.chancellor_id is None:
+            return f"[AUTO-PLAY] A {policy_str} policy was automatically played (3 failed elections)"
+        return f"Chancellor {self.chancellor_id} played a {policy_str} policy"

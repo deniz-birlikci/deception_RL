@@ -1,27 +1,38 @@
-from .agent import AgentRegistry
-from .env import settings
-from .models import UserInput, AIModel
-import time
+from src.engine.engine_api import EngineAPI
+from src.engine.deck import Deck
+from src.models import AIModel
 
 
 def main():
+    api = EngineAPI()
 
-    agent = AgentRegistry.create_agent(
-        backend=settings.ai.backend,
-        ai_model=AIModel.OPENAI_GPT_5
-    )
+    deck = Deck()
 
-    response = agent.generate_response(
-        [
-            UserInput(
-                history_type="user-input",
-                timestamp=str(int(time.time() * 1000)),
-                user_message="call the president choose card to discoard tool with card index 1",
-            )
-        ]
-    )
+    ai_models: list[AIModel | None] = [
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5_NANO,
+    ]
 
-    print(response)
+    result = api.create(deck=deck, ai_models=ai_models, log_file="game_log.txt")
+
+    print("=== GAME STARTED ===")
+    print(result)
+    print()
+
+    while isinstance(result, str):
+        user_input = input("Enter your response (JSON): ")
+        game_id = list(api.games.keys())[0]
+        result = api.execute(game_id, user_input)
+        print()
+        print("=== RESPONSE ===")
+        print(result)
+        print()
+
+    print("=== GAME OVER ===")
+    print(f"Winners: {result}")
 
 
 if __name__ == "__main__":

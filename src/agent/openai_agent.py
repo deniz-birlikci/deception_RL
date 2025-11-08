@@ -2,9 +2,9 @@ from typing import cast, Any
 from .base_agent import BaseAgent
 from ..models import AIModel, MessageHistory, AssistantResponse, Backend
 from ..model_converters import BaseModelConverterFactory
-from openai import OpenAI
+from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
-from ..tools import OPENAI_TOOLS
+from ..tools import generate_tools
 from ..env import settings
 
 
@@ -29,36 +29,24 @@ class OpenAIAgent(BaseAgent):
 
         self.api_key = self.api_key or settings.openai.api_key
         self.base_url = self.base_url or settings.openai.base_url
-        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
 
-        self.provider_order = kwargs.get(
-            "provider_order", settings.openai.provider_order
-        )
-        self.reasoning_enabled = kwargs.get(
-            "reasoning_enabled", settings.openai.reasoning_enabled
-        )
-        self.allow_fallbacks = kwargs.get(
-            "allow_fallbacks", settings.openai.allow_fallbacks
-        )
-
-    def generate_response(
-        self, message_history: list[MessageHistory]
+    async def generate_response(
+        self,
+        message_history: list[MessageHistory],
+        allowed_tools: list[str] | None = None,
+        eligible_agent_ids: list[str] | None = None,
     ) -> AssistantResponse:
         converted_history = self._convert_message_history(message_history)
 
-        provider_dict = {
-            "order": self.provider_order,
-            "allow_fallbacks": self.allow_fallbacks,
-        }
+        tools = generate_tools(allowed_tools, eligible_agent_ids)
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
-            tools=cast(list[ChatCompletionToolUnionParam], OPENAI_TOOLS),
-            # extra_body={
-            #     "provider": provider_dict,
-            #     "reasoning": {"enabled": self.reasoning_enabled},
-            # },
+            tools=cast(list[ChatCompletionToolUnionParam], tools),
+            tool_choice="required",
+            reasoning_effort="minimal",
         )
 
         return self.assistant_response_converter.from_dict(data=response.model_dump())
