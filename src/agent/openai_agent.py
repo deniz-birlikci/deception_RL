@@ -31,16 +31,6 @@ class OpenAIAgent(BaseAgent):
         self.base_url = self.base_url or settings.openai.base_url
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-        self.provider_order = self.kwargs.get(
-            "provider_order", settings.openai.provider_order
-        )
-        self.reasoning_enabled = self.kwargs.get(
-            "reasoning_enabled", settings.openai.reasoning_enabled
-        )
-        self.allow_fallbacks = self.kwargs.get(
-            "allow_fallbacks", settings.openai.allow_fallbacks
-        )
-
     def generate_response(
         self,
         message_history: list[MessageHistory],
@@ -51,26 +41,12 @@ class OpenAIAgent(BaseAgent):
 
         tools = generate_tools(allowed_tools, eligible_agent_ids)
 
-        reasoning_enabled_dict = {
-            "enabled": self.reasoning_enabled,
-        }
-
-        provider_dict = {
-            "order": self.provider_order,
-            "allow_fallbacks": self.allow_fallbacks,
-        }
-
         response = self.client.chat.completions.create(
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
             tools=cast(list[ChatCompletionToolUnionParam], tools),
             tool_choice="required",
-            extra_body={
-                "provider": provider_dict,
-                "reasoning": reasoning_enabled_dict,
-            },
+            reasoning_effort="minimal",
         )
-
-        print(response.model_dump())
 
         return self.assistant_response_converter.from_dict(data=response.model_dump())
