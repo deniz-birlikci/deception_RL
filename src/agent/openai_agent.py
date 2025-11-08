@@ -4,7 +4,7 @@ from ..models import AIModel, MessageHistory, AssistantResponse, Backend
 from ..model_converters import BaseModelConverterFactory
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
-from ..tools import OPENAI_TOOLS
+from ..tools import generate_tools
 from ..env import settings
 
 
@@ -35,14 +35,11 @@ class OpenAIAgent(BaseAgent):
         self,
         message_history: list[MessageHistory],
         allowed_tools: list[str] | None = None,
+        eligible_agent_ids: list[str] | None = None,
     ) -> AssistantResponse:
         converted_history = self._convert_message_history(message_history)
 
-        tools = (
-            [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
-            if allowed_tools
-            else OPENAI_TOOLS
-        )
+        tools = generate_tools(allowed_tools, eligible_agent_ids)
 
         response = self.client.chat.completions.create(
             model=self.ai_model,

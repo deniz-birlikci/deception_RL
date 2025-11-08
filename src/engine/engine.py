@@ -84,6 +84,12 @@ class Engine:
         while not self._is_game_over():
             president_id = self.president_rotation[self.current_president_idx]
 
+            eligible_chancellor_ids = [
+                aid
+                for aid in self.agents_by_id.keys()
+                if aid != president_id and aid != self.current_chancellor_id
+            ]
+
             tool = cast(
                 PresidentPickChancellorTool,
                 self._get_tool(
@@ -92,6 +98,7 @@ class Engine:
                     input_queue,
                     output_queue,
                     allowed_tools=["president-pick-chancellor"],
+                    eligible_agent_ids=eligible_chancellor_ids,
                 ),
             )
             chancellor_id = tool.agent_id
@@ -161,7 +168,7 @@ class Engine:
             played = cards[idx]
             discarded_by_chancellor = cards[1 - idx]
             self.deck.add_to_discard(discarded_by_chancellor)
-            
+
             self.private_events_by_agent[chancellor_id].append(
                 ChancellorReceivePoliciesEventPrivate(
                     chancellor_id=chancellor_id,
@@ -199,6 +206,7 @@ class Engine:
         input_queue: Queue,
         output_queue: Queue,
         allowed_tools: list[str] | None = None,
+        eligible_agent_ids: list[str] | None = None,
     ) -> Tools:
         agent = self.agents_by_id[agent_id]
         full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
@@ -214,7 +222,9 @@ class Engine:
             )
             self.msg_history[agent_id].append(user_input)
             response = self.ai_agents[agent_id].generate_response(
-                self.msg_history[agent_id], allowed_tools=allowed_tools
+                self.msg_history[agent_id],
+                allowed_tools=allowed_tools,
+                eligible_agent_ids=eligible_agent_ids,
             )
             self.msg_history[agent_id].append(response)
 
@@ -235,7 +245,10 @@ class Engine:
 
     def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
         speakers = []
+        all_agent_ids = list(self.agents_by_id.keys())
+
         for aid in self.agents_by_id:
+            other_agent_ids = [a for a in all_agent_ids if a != aid]
             tool = cast(
                 AskAgentIfWantsToSpeakTool,
                 self._get_tool(
@@ -244,6 +257,7 @@ class Engine:
                     input_queue,
                     output_queue,
                     allowed_tools=["ask-agent-if-wants-to-speak"],
+                    eligible_agent_ids=other_agent_ids,
                 ),
             )
             if tool.question_or_statement:
