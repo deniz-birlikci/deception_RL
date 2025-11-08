@@ -2,7 +2,7 @@ import random
 import uuid
 from queue import Queue
 from typing import cast
-
+import json
 from src.models import (
     Agent,
     AgentRole,
@@ -48,12 +48,12 @@ class Engine:
         ai_models: list[AIModel | None],
         fascist_policies_to_win: int,
         liberal_policies_to_win: int,
-        verbose: bool,
+        log_file: str | None = None,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
-        self.verbose = verbose
+        self.log_file = log_file
 
         shuffled_roles = random.sample(ROLES, len(ROLES))
         agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
@@ -167,6 +167,8 @@ class Engine:
             self.current_president_idx = (self.current_president_idx + 1) % len(
                 self.president_rotation
             )
+
+            self._log_state_to_file()
 
         output_queue.put(self._get_winners())
 
@@ -357,3 +359,28 @@ class Engine:
             + fascist_info_str
             + action_str
         )
+
+    def _log_state_to_file(self) -> None:
+        if not self.log_file:
+            return
+
+        state = {
+            "agents": {
+                aid: {"role": agent.role.value, "ai_model": agent.ai_model}
+                for aid, agent in self.agents_by_id.items()
+            },
+            "president_rotation": self.president_rotation,
+            "current_president_idx": self.current_president_idx,
+            "current_chancellor_id": self.current_chancellor_id,
+            "fascist_policies_played": self.fascist_policies_played,
+            "liberal_policies_played": self.liberal_policies_played,
+            "public_events": [str(e) for e in self.public_events],
+            "private_events_by_agent": {
+                aid: [str(e) for e in events]
+                for aid, events in self.private_events_by_agent.items()
+            },
+        }
+
+        with open(self.log_file, "a") as f:
+            f.write("=" * 60 + "\n")
+            f.write(json.dumps(state, indent=2) + "\n")

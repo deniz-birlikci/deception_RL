@@ -16,7 +16,7 @@ def main():
         AIModel.OPENAI_GPT_5_MINI,
     ]
 
-    result = api.create(deck=deck, ai_models=ai_models, verbose=True)
+    result = api.create(deck=deck, ai_models=ai_models, log_file="game_log.txt")
 
     print("=== GAME STARTED ===")
     print(result)
