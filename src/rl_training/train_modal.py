@@ -46,9 +46,6 @@ ENABLE_RULER = True
     # mounts=[modal.Mount.from_local_dir(".", remote_path="/root/2048_example")],
 )
 async def train():
-    import os
-    import sys
-
     # Change to the mounted directory so imports work
     # os.chdir("/root/2048_example")
     # sys.path.insert(0, "/root/2048_example")
