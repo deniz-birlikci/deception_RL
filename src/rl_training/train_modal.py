@@ -1,6 +1,9 @@
 import asyncio
 import random
+from pathlib import Path
+
 import modal
+from omegaconf import OmegaConf
 
 import art
 
@@ -20,6 +23,7 @@ image = (
         "weave>=0.51.51",
         "numpy==1.26.4",
         "s3fs",
+        "omegaconf",
     )
     # .add_local_dir("example_2048", "/root/example_2048")
 )
@@ -33,113 +37,144 @@ image = (
 #   AWS_SECRET_ACCESS_KEY=<your-key> \
 #   WANDB_API_KEY=<your-key>
 
-TRAIN_STEPS = 40
-SIMULTANEOUS_GAMES = 18
-ENABLE_RULER = True
-
 
 @app.function(
     image=image,
-    gpu="H100",  # or "T4", "A100", etc.
-    timeout=7200,  # 2 hours
-    secrets=[modal.Secret.from_name("wandb-secret")],
+    gpu=modal.gpu.H100(),  # Will be overridden by config
+    timeout=7200,  # Will be overridden by config
+    secrets=[modal.Secret.from_name("wandb-secret")],  # Will be overridden by config
     # mounts=[modal.Mount.from_local_dir(".", remote_path="/root/2048_example")],
 )
-async def train():
-    # Change to the mounted directory so imports work
-    # os.chdir("/root/2048_example")
-    # sys.path.insert(0, "/root/2048_example")
+async def train(config_dict: dict):
+    """
+    Train the Secret Hitler RL agent.
 
+    Args:
+        config_dict: Configuration dictionary (loaded from YAML and serialized)
+    """
     # NOW import these - they run in Modal's environment with all deps
     from .rollout import rollout
+    from .config import TrainingConfig
     from art.local import LocalBackend
-    from art.rewards import ruler_score_group
+
+    # Reconstruct config from dict
+    config = OmegaConf.structured(TrainingConfig)
+    config = OmegaConf.merge(config, config_dict)
+
+    print("=== Training Configuration ===")
+    print(OmegaConf.to_yaml(config))
+    print("=" * 50)
 
     # Set random seed
-    random.seed(42)
+    random.seed(config.train.random_seed)
 
     print("Starting training")
 
     # Declare the model
     model = art.TrainableModel(
-        name="tutorial-001",
-        project="2048",
-        base_model="Qwen/Qwen2.5-3B-Instruct",
+        name=config.model.name,
+        project=config.model.project,
+        base_model=config.model.base_model,
     )
-    print("Model declared")
+    print(f"Model declared: {config.model.name}")
     model._internal_config = art.dev.InternalModelConfig(
         init_args=art.dev.InitArgs(
-            max_seq_length=8192,
+            max_seq_length=config.train.max_seq_length,
+        ),
+        engine_args=art.dev.EngineArgs(
+            gpu_memory_utilization=config.train.gpu_memory_utilization,
+            tensor_parallel_size=config.train.tensor_parallel_size,
         ),
     )
-    print("Internal model config declared")
 
     # Initialize the backend
     backend = LocalBackend()
-    print("Backend declared")
+    print("Backend initialized")
 
     # Register the model with the local backend (sets up logging, inference, and training)
     await model.register(backend)
     print("Model registered")
 
-    # await backend._experimental_pull_from_s3(
-    #     model,
-    #     verbose=True,
-    # )
-    print("Model pulled from S3")
-
-    # Train for TRAIN_STEPS steps
-    for i in range(await model.get_step(), TRAIN_STEPS):
-        print(f"Starting training step {i}/{TRAIN_STEPS}")
+    # Train for specified steps
+    for i in range(await model.get_step(), config.train.train_steps):
+        print(f"Starting training step {i}/{config.train.train_steps}")
 
         train_groups = await art.gather_trajectory_groups(
             (
                 art.TrajectoryGroup(
-                    # for each step, rollout SIMULTANEOUS_GAMES trajectories
-                    rollout(model, i, is_validation=False)
-                    for _ in range(SIMULTANEOUS_GAMES)
+                    # for each step, rollout simultaneous games
+                    rollout(
+                        model,
+                        i,
+                        is_validation=False,
+                        max_turns=config.rollout.max_turns,
+                        enable_thinking=config.rollout.enable_thinking,
+                        verbose=config.rollout.verbose,
+                    )
+                    for _ in range(config.rollout.simultaneous_games)
                 )
                 for _ in range(1)
-            ),
-            after_each=lambda group: (
-                ruler_score_group(
-                    group,
-                    "openai/o4-mini",
-                    debug=True,
-                    swallow_exceptions=True,  # Return None on error, filtering out the group
-                )
-                if ENABLE_RULER
-                else None
             ),
             pbar_desc="gather",
             max_exceptions=10,
         )
 
-        # save the model to S3
-        # await backend._experimental_push_to_s3(
-        #     model,
-        # )
-
         await model.train(
             train_groups,
-            config=art.TrainConfig(learning_rate=1e-5),
+            config=art.TrainConfig(learning_rate=config.train.learning_rate),
         )
 
-        print(f"Completed training step {i}/{TRAIN_STEPS}")
+        print(f"Completed training step {i}/{config.train.train_steps}")
 
 
 @app.local_entrypoint()
-def main():
+def main(config_path: str = "configs/train_default.yaml"):
     """
     Local entrypoint for running the training on Modal.
-    Run with: modal run train_modal.py
+
+    Args:
+        config_path: Path to YAML config file (default: configs/train_default.yaml)
+
+    Usage:
+        modal run src/rl_training/train_modal.py
+        modal run src/rl_training/train_modal.py --config-path configs/my_config.yaml
     """
-    # Run the train function
-    print("Running train function")
-    train.remote()
+    from .config import TrainingConfig
+
+    # Load config from YAML
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    print(f"Loading config from: {config_path}")
+
+    # Load YAML and merge with structured config
+    yaml_config = OmegaConf.load(config_file)
+    structured_config = OmegaConf.structured(TrainingConfig)
+    config = OmegaConf.merge(structured_config, yaml_config)
+
+    # Validate config (will raise error if MISSING values not provided)
+    OmegaConf.to_container(config, throw_on_missing=True)
+
+    print("Config loaded successfully")
+
+    # Convert to dict for serialization to Modal
+    config_dict = OmegaConf.to_container(config, resolve=True)
+
+    # Run the train function with config
+    print("Submitting training job to Modal...")
+    train.remote(config_dict)
 
 
 if __name__ == "__main__":
     # For local testing (not on Modal)
     # This won't actually run on Modal, just locally
-    asyncio.run(train())
+    from .config import TrainingConfig
+
+    config_file = Path("configs/train_default.yaml")
+    yaml_config = OmegaConf.load(config_file)
+    structured_config = OmegaConf.structured(TrainingConfig)
+    config = OmegaConf.merge(structured_config, yaml_config)
+    config_dict = OmegaConf.to_container(config, resolve=True)
+
+    asyncio.run(train(config_dict))
