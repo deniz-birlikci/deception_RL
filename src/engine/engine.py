@@ -1,6 +1,7 @@
+import asyncio
 import random
 import uuid
-from queue import Queue
+from asyncio import Queue
 from typing import cast
 import json
 from src.models import (
@@ -27,12 +28,14 @@ from src.models import (
     ToolResult,
     EngineEvent,
 )
+from src.engine.protocol import ModelInput, ToolCallTarget, TerminalState
 from src.agent import BaseAgent
 from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
 from src.engine.external_agent_response_parser import ExternalAgentResponseParser
 from src.models import Tools
 from src.engine.prompts import get_base_game_rules_prompt
+from src.tools import OPENAI_TOOLS
 
 ROLES = [
     AgentRole.HITLER,
@@ -84,7 +87,16 @@ class Engine:
                     backend=Backend.OPENAI, ai_model=agent.ai_model
                 )
 
-    def run(self, input_queue: Queue, output_queue: Queue) -> None:
+
+    def _generate_terminal_state(self) -> TerminalState:
+        # TODO: check if I've won, populate it with the correct terminal state
+        return TerminalState(
+            reward=1.0 if self._get_winners() else 0.0,
+            have_won=self._get_winners(),
+        )
+
+
+    async def run(self, input_queue: Queue, output_queue: Queue) -> None:
         while not self._is_game_over():
             president_id = self.president_rotation[self.current_president_idx]
 
@@ -96,7 +108,7 @@ class Engine:
 
             tool = cast(
                 PresidentPickChancellorTool,
-                self._get_tool(
+                await self._get_tool(
                     president_id,
                     "Nominate a Chancellor.",
                     input_queue,
@@ -114,33 +126,33 @@ class Engine:
                 )
             )
             self.event_counter += 1
-            self._log_state_to_file()
+            await self._log_state_to_file()
 
-            self._discourse(input_queue, output_queue)
-            self._log_state_to_file()
+            await self._discourse(input_queue, output_queue)
+            await self._log_state_to_file()
 
-            if not self._vote(chancellor_id, input_queue, output_queue):
+            if not await self._vote(chancellor_id, input_queue, output_queue):
                 self.failed_election_tracker += 1
-                self._log_state_to_file()
+                await self._log_state_to_file()
 
                 if self.failed_election_tracker >= 3:
                     self._handle_failed_election()
-                    self._log_state_to_file()
+                    await self._log_state_to_file()
 
                 self.current_president_idx = (self.current_president_idx + 1) % len(
                     self.president_rotation
                 )
-                self._log_state_to_file()
+                await self._log_state_to_file()
                 continue
 
             self.failed_election_tracker = 0
             self.current_chancellor_id = chancellor_id
-            self._log_state_to_file()
+            await self._log_state_to_file()
 
             cards = self.deck.draw(3)
             tool = cast(
                 PresidentChooseCardToDiscardTool,
-                self._get_tool(
+                await self._get_tool(
                     president_id,
                     f"Cards: {cards}. Discard index (0-2).",
                     input_queue,
@@ -161,11 +173,11 @@ class Engine:
                 )
             )
             self.event_counter += 1
-            self._log_state_to_file()
+            await self._log_state_to_file()
 
             tool = cast(
                 ChancellorPlayPolicyTool,
-                self._get_tool(
+                await self._get_tool(
                     chancellor_id,
                     f"Cards: {cards}. Play index (0-1).",
                     input_queue,
@@ -196,24 +208,34 @@ class Engine:
                 )
             )
             self.event_counter += 1
-            self._log_state_to_file()
+            await self._log_state_to_file()
 
             if played == PolicyCard.FASCIST:
                 self.fascist_policies_played += 1
             else:
                 self.liberal_policies_played += 1
 
-            self._discourse(input_queue, output_queue)
-            self._log_state_to_file()
+            await self._discourse(input_queue, output_queue)
+            await self._log_state_to_file()
 
             self.current_president_idx = (self.current_president_idx + 1) % len(
                 self.president_rotation
             )
-            self._log_state_to_file()
+            await self._log_state_to_file()
 
-        output_queue.put(self._get_winners())
+        # TODO: implement the end logic here...
+        # Game is over, generate the terminal state
+        terminal_state = self._generate_terminal_state()
+        final_model_input = ModelInput(
+            # TODO: the messages here should be the full history of the game
+            # ideally... or the model can store the history itself...
+            messages=[],
+            tool_call=None,
+            terminal_state=terminal_state,
+        )
+        await output_queue.put(final_model_input)
 
-    def _get_tool(
+    async def _get_tool(
         self,
         agent_id: str,
         prompt_guidance: str,
@@ -226,8 +248,32 @@ class Engine:
         full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
 
         if agent.ai_model is None:
-            output_queue.put(full_prompt)
-            response = ExternalAgentResponseParser.parse(input_queue.get())
+            tools = (
+                [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
+                if allowed_tools
+                else OPENAI_TOOLS
+            )
+
+            # Assert that there is only one tool
+            assert len(tools) == 1
+
+            # Create the tool call target
+            tool_call_target = ToolCallTarget(
+                name=tools[0]["function"]["name"],
+                openai_schema=tools[0],
+            )
+
+            # Create the new model input
+            model_input = ModelInput(
+                # TODO: fix the messages here...
+                messages=[{"role": "user", "content": full_prompt}],
+                tool_call=tool_call_target,
+                terminal_state=None,
+            )
+
+            # Place the model input back on the queue
+            await output_queue.put(model_input)
+            response = ExternalAgentResponseParser.parse(await input_queue.get())
         else:
             user_input = UserInput(
                 history_type="user-input",
@@ -235,7 +281,7 @@ class Engine:
                 timestamp=str(uuid.uuid4()),
             )
             self.msg_history[agent_id].append(user_input)
-            response = self.ai_agents[agent_id].generate_response(
+            response = await self.ai_agents[agent_id].generate_response(
                 self.msg_history[agent_id],
                 allowed_tools=allowed_tools,
                 eligible_agent_ids=eligible_agent_ids,
@@ -257,23 +303,24 @@ class Engine:
 
         return response.hydrated_tool_calls[0]
 
-    def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
-        speakers = []
-        all_agent_ids = list(self.agents_by_id.keys())
-
-        for aid in self.agents_by_id:
-            other_agent_ids = [a for a in all_agent_ids if a != aid]
-            tool = cast(
-                AskAgentIfWantsToSpeakTool,
-                self._get_tool(
-                    aid,
-                    "Speak? (question/statement or null)",
-                    input_queue,
-                    output_queue,
-                    allowed_tools=["ask-agent-if-wants-to-speak"],
-                    eligible_agent_ids=other_agent_ids,
-                ),
+    async def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
+        # Parallelize asking all agents if they want to speak
+        ask_tasks = [
+            self._get_tool(
+                aid,
+                "Speak? (question/statement or null)",
+                input_queue,
+                output_queue,
+                allowed_tools=["ask-agent-if-wants-to-speak"],
+                eligible_agent_ids=[other_aid for other_aid in self.agents_by_id if other_aid != aid],
             )
+            for aid in self.agents_by_id
+        ]
+        tools = await asyncio.gather(*ask_tasks)
+
+        speakers = []
+        for aid, tool in zip(self.agents_by_id.keys(), tools):
+            tool = cast(AskAgentIfWantsToSpeakTool, tool)
             if tool.question_or_statement:
                 speakers.append((aid, tool))
 
@@ -294,7 +341,7 @@ class Engine:
                 target = tool.ask_directed_question_to_agent_id
                 resp = cast(
                     AgentResponseToQuestionTool,
-                    self._get_tool(
+                    await self._get_tool(
                         target,
                         f"Asked: {tool.question_or_statement}. Respond.",
                         input_queue,
@@ -328,21 +375,25 @@ class Engine:
             self.liberal_policies_played += 1
         self.failed_election_tracker = 0
 
-    def _vote(
+    async def _vote(
         self, chancellor_id: str, input_queue: Queue, output_queue: Queue
     ) -> bool:
-        votes = []
-        for aid in self.agents_by_id:
-            tool = cast(
-                VoteChancellorYesNoTool,
-                self._get_tool(
-                    aid,
-                    f"Vote on Chancellor {chancellor_id}? (true/false)",
-                    input_queue,
-                    output_queue,
-                    allowed_tools=["vote-chancellor-yes-no"],
-                ),
+        # Parallelize all votes
+        vote_tasks = [
+            self._get_tool(
+                aid,
+                f"Vote on Chancellor {chancellor_id}? (true/false)",
+                input_queue,
+                output_queue,
+                allowed_tools=["vote-chancellor-yes-no"],
             )
+            for aid in self.agents_by_id
+        ]
+        tools = await asyncio.gather(*vote_tasks)
+
+        votes = []
+        for aid, tool in zip(self.agents_by_id.keys(), tools):
+            tool = cast(VoteChancellorYesNoTool, tool)
             votes.append(tool.choice)
             self.public_events.append(
                 VoteChancellorYesNoEventPublic(
@@ -445,7 +496,7 @@ class Engine:
         action_str = f"\n=== ACTION REQUIRED ===\n{action_prompt}\n"
         return game_state + events_str + fascist_info_str + action_str
 
-    def _log_state_to_file(self) -> None:
+    async def _log_state_to_file(self) -> None:
         if not self.log_file:
             return
 
@@ -467,6 +518,17 @@ class Engine:
             },
         }
 
+        # Use asyncio to write to file without blocking
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            self._write_log,
+            state,
+        )
+
+    def _write_log(self, state: dict) -> None:
+        """Helper method to write log synchronously in executor."""
         with open(self.log_file, "a") as f:
             f.write("=" * 60 + "\n")
             f.write(json.dumps(state, indent=2) + "\n")
+

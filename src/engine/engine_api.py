@@ -1,11 +1,15 @@
+import asyncio
+import traceback
+from asyncio import Queue
 import uuid
 import threading
 import traceback
 from queue import Queue
 from typing import Dict
-from src.models import Agent, AIModel
+from src.models import AIModel
 from src.engine.engine import Engine
 from src.engine.deck import Deck
+from src.engine.protocol import ModelInput, ModelOutput
 
 DEFAULT_AI_MODELS = [
     AIModel.OPENAI_GPT_5,
@@ -20,20 +24,20 @@ class EngineAPI:
     def __init__(self):
         self.games: Dict[str, tuple[Queue, Queue]] = {}
         self.engines: Dict[str, Engine] = {}
-        self.threads: Dict[str, threading.Thread] = {}
+        self.tasks: Dict[str, asyncio.Task] = {}
 
-    def create(
+    async def create(
         self,
+        game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
         fascist_policies_to_win: int = 6,
         liberal_policies_to_win: int = 5,
         log_file: str | None = None,
-    ) -> str | list[Agent]:
-        game_id = str(uuid.uuid4())
+    ) -> ModelInput:
 
-        input_queue = Queue()
-        output_queue = Queue()
+        input_queue: Queue = Queue()
+        output_queue: Queue = Queue()
 
         self.games[game_id] = (input_queue, output_queue)
 
@@ -46,27 +50,34 @@ class EngineAPI:
         )
         self.engines[game_id] = engine
 
-        thread = threading.Thread(
-            target=self._run_engine,
-            args=(game_id, engine, input_queue, output_queue),
-            daemon=True,
+        # Create asyncio task instead of thread
+        task = asyncio.create_task(
+            self._run_engine(game_id, engine, input_queue, output_queue)
         )
-        self.threads[game_id] = thread
-        thread.start()
+        self.tasks[game_id] = task
 
-        return output_queue.get()
+        # Await the initial message from the game engine
+        model_input = await output_queue.get()
+        assert isinstance(model_input, ModelInput)
+        return model_input
 
-    def execute(self, game_id: str, response: str | None) -> str | list[Agent]:
+    async def execute(self, game_id: str, model_output: ModelOutput) -> ModelInput:
+        # First check that the game exists
         if game_id not in self.games:
             raise ValueError(f"Game {game_id} not found")
 
+        # Obtain the input queue and output queue for the game
         input_queue, output_queue = self.games[game_id]
 
-        input_queue.put(response)
+        # Then, place the model output on the input queue
+        await input_queue.put(model_output)
 
-        return output_queue.get()
+        # Await the next message from the game engine
+        model_input = await output_queue.get()
+        assert isinstance(model_input, ModelInput)
+        return model_input
 
-    def _run_engine(
+    async def _run_engine(
         self,
         game_id: str,
         engine: Engine,
@@ -74,17 +85,17 @@ class EngineAPI:
         output_queue: Queue,
     ) -> None:
         try:
-            engine.run(input_queue, output_queue)
+            await engine.run(input_queue, output_queue)
         except Exception as e:
             tb = traceback.format_exc()
-            output_queue.put(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
+            await output_queue.put(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
         finally:
             if game_id in self.games:
                 del self.games[game_id]
             if game_id in self.engines:
                 del self.engines[game_id]
-            if game_id in self.threads:
-                del self.threads[game_id]
+            if game_id in self.tasks:
+                del self.tasks[game_id]
 
     def get_game_ids(self) -> list[str]:
         return list(self.games.keys())
