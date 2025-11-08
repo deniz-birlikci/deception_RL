@@ -312,7 +312,6 @@ class Engine:
                 input_queue,
                 output_queue,
                 allowed_tools=["ask-agent-if-wants-to-speak"],
-                eligible_agent_ids=[other_aid for other_aid in self.agents_by_id if other_aid != aid],
             )
             for aid in self.agents_by_id
         ]
