@@ -141,7 +141,11 @@ class PolicyCard(str, Enum):
     FASCIST = "fascist"
 
 
-class PresidentPickChancellorEventPublic(BaseModel):
+class EngineEvent(BaseModel):
+    event_order_counter: int
+
+
+class PresidentPickChancellorEventPublic(EngineEvent):
     president_id: str
     chancellor_id: str
 
@@ -149,7 +153,7 @@ class PresidentPickChancellorEventPublic(BaseModel):
         return f"President {self.president_id} nominated {self.chancellor_id} as Chancellor"
 
 
-class VoteChancellorYesNoEventPublic(BaseModel):
+class VoteChancellorYesNoEventPublic(EngineEvent):
     voter_id: str
     chancellor_nominee_id: str
     vote: bool
@@ -159,7 +163,7 @@ class VoteChancellorYesNoEventPublic(BaseModel):
         return f"{self.voter_id} voted {vote_str} on {self.chancellor_nominee_id}"
 
 
-class ChooseAgentToVoteOutEventPublic(BaseModel):
+class ChooseAgentToVoteOutEventPublic(EngineEvent):
     voter_id: str
     nominated_agent_id: str | None
 
@@ -169,7 +173,7 @@ class ChooseAgentToVoteOutEventPublic(BaseModel):
         return f"{self.voter_id} chose not to nominate anyone to be voted out"
 
 
-class AskAgentIfWantsToSpeakEventPublic(BaseModel):
+class AskAgentIfWantsToSpeakEventPublic(EngineEvent):
     agent_id: str
     question_or_statement: str | None
     ask_directed_question_to_agent_id: str | None
@@ -180,7 +184,7 @@ class AskAgentIfWantsToSpeakEventPublic(BaseModel):
         return f"{self.agent_id} said: \"{self.question_or_statement}\""
 
 
-class AgentResponseToQuestioningEventPublic(BaseModel):
+class AgentResponseToQuestioningEventPublic(EngineEvent):
     agent_id: str
     in_response_to_agent_id: str
     response: str
@@ -189,7 +193,7 @@ class AgentResponseToQuestioningEventPublic(BaseModel):
         return f"{self.agent_id} responded to {self.in_response_to_agent_id}: \"{self.response}\""
 
 
-class PresidentChooseCardToDiscardEventPrivate(BaseModel):
+class PresidentChooseCardToDiscardEventPrivate(EngineEvent):
     president_id: str
     cards_drawn: list[PolicyCard]
     card_discarded: PolicyCard
@@ -199,7 +203,7 @@ class PresidentChooseCardToDiscardEventPrivate(BaseModel):
         return f"You drew 3 cards: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
 
 
-class ChancellorReceivePoliciesEventPrivate(BaseModel):
+class ChancellorReceivePoliciesEventPrivate(EngineEvent):
     chancellor_id: str
     president_id_received_from: str
     cards_received: list[PolicyCard]
@@ -210,7 +214,7 @@ class ChancellorReceivePoliciesEventPrivate(BaseModel):
         return f"You received 2 cards from President {self.president_id_received_from}: [{cards_str}] and discarded {self.card_discarded.value.upper()}"
 
 
-class ChancellorPlayPolicyEventPublic(BaseModel):
+class ChancellorPlayPolicyEventPublic(EngineEvent):
     chancellor_id: str | None
     card_played: PolicyCard
 

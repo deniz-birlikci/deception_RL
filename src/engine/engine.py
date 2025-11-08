@@ -25,6 +25,7 @@ from src.models import (
     UserInput,
     ToolFeedback,
     ToolResult,
+    EngineEvent,
 )
 from src.agent import BaseAgent
 from src.engine.deck import Deck
@@ -69,6 +70,7 @@ class Engine:
         self.fascist_policies_played: int = 0
         self.liberal_policies_played: int = 0
         self.failed_election_tracker: int = 0
+        self.event_counter: int = 0
         self.public_events: list = []
         self.private_events_by_agent: dict[str, list] = {aid: [] for aid in agent_ids}
 
@@ -104,9 +106,12 @@ class Engine:
             chancellor_id = tool.agent_id
             self.public_events.append(
                 PresidentPickChancellorEventPublic(
-                    president_id=president_id, chancellor_id=chancellor_id
+                    event_order_counter=self.event_counter,
+                    president_id=president_id,
+                    chancellor_id=chancellor_id,
                 )
             )
+            self.event_counter += 1
             self._log_state_to_file()
 
             self._discourse(input_queue, output_queue)
@@ -147,11 +152,13 @@ class Engine:
 
             self.private_events_by_agent[president_id].append(
                 PresidentChooseCardToDiscardEventPrivate(
+                    event_order_counter=self.event_counter,
                     president_id=president_id,
                     cards_drawn=cards + [discarded],
                     card_discarded=discarded,
                 )
             )
+            self.event_counter += 1
             self._log_state_to_file()
 
             tool = cast(
@@ -171,17 +178,22 @@ class Engine:
 
             self.private_events_by_agent[chancellor_id].append(
                 ChancellorReceivePoliciesEventPrivate(
+                    event_order_counter=self.event_counter,
                     chancellor_id=chancellor_id,
                     president_id_received_from=president_id,
                     cards_received=cards,
                     card_discarded=discarded_by_chancellor,
                 )
             )
+            self.event_counter += 1
             self.public_events.append(
                 ChancellorPlayPolicyEventPublic(
-                    chancellor_id=chancellor_id, card_played=played
+                    event_order_counter=self.event_counter,
+                    chancellor_id=chancellor_id,
+                    card_played=played,
                 )
             )
+            self.event_counter += 1
             self._log_state_to_file()
 
             if played == PolicyCard.FASCIST:
@@ -268,11 +280,13 @@ class Engine:
         for aid, tool in speakers:
             self.public_events.append(
                 AskAgentIfWantsToSpeakEventPublic(
+                    event_order_counter=self.event_counter,
                     agent_id=aid,
                     question_or_statement=tool.question_or_statement,
                     ask_directed_question_to_agent_id=tool.ask_directed_question_to_agent_id,
                 )
             )
+            self.event_counter += 1
 
             if tool.ask_directed_question_to_agent_id:
                 target = tool.ask_directed_question_to_agent_id
@@ -288,17 +302,24 @@ class Engine:
                 )
                 self.public_events.append(
                     AgentResponseToQuestioningEventPublic(
+                        event_order_counter=self.event_counter,
                         agent_id=target,
                         in_response_to_agent_id=aid,
                         response=resp.response,
                     )
                 )
+                self.event_counter += 1
 
     def _handle_failed_election(self) -> None:
         top_card = self.deck.draw(1)[0]
         self.public_events.append(
-            ChancellorPlayPolicyEventPublic(chancellor_id=None, card_played=top_card)
+            ChancellorPlayPolicyEventPublic(
+                event_order_counter=self.event_counter,
+                chancellor_id=None,
+                card_played=top_card,
+            )
         )
+        self.event_counter += 1
         if top_card == PolicyCard.FASCIST:
             self.fascist_policies_played += 1
         else:
@@ -323,9 +344,13 @@ class Engine:
             votes.append(tool.choice)
             self.public_events.append(
                 VoteChancellorYesNoEventPublic(
-                    voter_id=aid, chancellor_nominee_id=chancellor_id, vote=tool.choice
+                    event_order_counter=self.event_counter,
+                    voter_id=aid,
+                    chancellor_nominee_id=chancellor_id,
+                    vote=tool.choice,
                 )
             )
+            self.event_counter += 1
         return sum(votes) > len(votes) // 2
 
     def _is_game_over(self) -> bool:
@@ -374,19 +399,17 @@ class Engine:
         All Agents: {list(self.agents_by_id.keys())}
         """
 
-        public_events_str = "\n=== PUBLIC EVENTS ===\n"
-        if self.public_events:
-            for i, event in enumerate(self.public_events, 1):
-                public_events_str += f"{i}. {event}\n"
-        else:
-            public_events_str += "No public events yet.\n"
+        all_events: list[EngineEvent] = (
+            self.public_events + self.private_events_by_agent[agent_id]
+        )
+        all_events_sorted = sorted(all_events, key=lambda e: e.event_order_counter)
 
-        private_events_str = "\n=== YOUR PRIVATE EVENTS ===\n"
-        if self.private_events_by_agent[agent_id]:
-            for i, event in enumerate(self.private_events_by_agent[agent_id], 1):
-                private_events_str += f"{i}. {event}\n"
+        events_str = "\n=== ALL EVENTS ===\n"
+        if all_events_sorted:
+            for i, event in enumerate(all_events_sorted, 1):
+                events_str += f"{i}. {event}\n"
         else:
-            private_events_str += "No private events yet.\n"
+            events_str += "No events yet.\n"
 
         fascist_info_str = ""
         fascist_ids = [
@@ -398,13 +421,7 @@ class Engine:
             fascist_info_str = f"\n=== FELLOW FASCISTS ===\n{fascist_ids}\n"
 
         action_str = f"\n=== ACTION REQUIRED ===\n{action_prompt}\n"
-        return (
-            game_state
-            + public_events_str
-            + private_events_str
-            + fascist_info_str
-            + action_str
-        )
+        return game_state + events_str + fascist_info_str + action_str
 
     def _log_state_to_file(self) -> None:
         if not self.log_file:
