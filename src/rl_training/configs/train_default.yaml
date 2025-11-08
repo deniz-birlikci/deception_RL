@@ -1,0 +1,27 @@
+# Default training configuration for Secret Hitler RL
+# 
+# Usage:
+#   modal run src/rl_training/train_modal.py --config configs/train_default.yaml
+
+model:
+  name: "secret-hitler-v1"
+  project: "secret-hitler"
+  base_model: "Qwen/Qwen2.5-3B-Instruct"
+
+rollout:
+  max_turns: 100
+  max_retries: 3
+  simultaneous_games: 18
+  enable_thinking: true
+  verbose: false
+
+train:
+  train_steps: 40
+  learning_rate: 1e-5
+  random_seed: 42
+
+  # max sequence length
+  max_seq_length: 8192
+  gpu_memory_utilization: 0.7
+  tensor_parallel_size: 1
+
