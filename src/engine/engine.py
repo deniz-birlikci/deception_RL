@@ -68,6 +68,7 @@ class Engine:
         self.current_chancellor_id: str | None = None
         self.fascist_policies_played: int = 0
         self.liberal_policies_played: int = 0
+        self.failed_election_tracker: int = 0
         self.public_events: list = []
         self.private_events_by_agent: dict[str, list] = {aid: [] for aid in agent_ids}
 
@@ -105,11 +106,20 @@ class Engine:
             self._log_state_to_file()
 
             if not self._vote(chancellor_id, input_queue, output_queue):
+                self.failed_election_tracker += 1
+                self._log_state_to_file()
+
+                if self.failed_election_tracker >= 3:
+                    self._handle_failed_election()
+                    self._log_state_to_file()
+
                 self.current_president_idx = (self.current_president_idx + 1) % len(
                     self.president_rotation
                 )
                 self._log_state_to_file()
                 continue
+
+            self.failed_election_tracker = 0
             self.current_chancellor_id = chancellor_id
             self._log_state_to_file()
 
@@ -266,6 +276,17 @@ class Engine:
                     )
                 )
 
+    def _handle_failed_election(self) -> None:
+        top_card = self.deck.draw(1)[0]
+        self.public_events.append(
+            ChancellorPlayPolicyEventPublic(chancellor_id=None, card_played=top_card)
+        )
+        if top_card == PolicyCard.FASCIST:
+            self.fascist_policies_played += 1
+        else:
+            self.liberal_policies_played += 1
+        self.failed_election_tracker = 0
+
     def _vote(
         self, chancellor_id: str, input_queue: Queue, output_queue: Queue
     ) -> bool:
@@ -330,6 +351,7 @@ class Engine:
         Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else 'None'}
         Fascist Policies Played: {self.fascist_policies_played}/{self.fascist_policies_to_win}
         Liberal Policies Played: {self.liberal_policies_played}/{self.liberal_policies_to_win}
+        Failed Elections: {self.failed_election_tracker}/3 (at 3, top policy is played automatically)
 
         All Agents: {list(self.agents_by_id.keys())}
         """
@@ -380,6 +402,7 @@ class Engine:
             "current_chancellor_id": self.current_chancellor_id,
             "fascist_policies_played": self.fascist_policies_played,
             "liberal_policies_played": self.liberal_policies_played,
+            "failed_election_tracker": self.failed_election_tracker,
             "public_events": [str(e) for e in self.public_events],
             "private_events_by_agent": {
                 aid: [str(e) for e in events]

@@ -183,5 +183,5 @@ class ChancellorReceivePoliciesEventPrivate(BaseModel):
 
 
 class ChancellorPlayPolicyEventPublic(BaseModel):
-    chancellor_id: str
+    chancellor_id: str | None
     card_played: PolicyCard
