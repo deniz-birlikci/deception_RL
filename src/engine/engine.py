@@ -32,6 +32,7 @@ from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
 from src.engine.external_agent_response_parser import ExternalAgentResponseParser
 from src.models import Tools
+from src.engine.prompts import get_base_game_rules_prompt
 
 ROLES = [
     AgentRole.HITLER,
@@ -54,6 +55,7 @@ class Engine:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
+        self.hitler_election_threshold = fascist_policies_to_win // 2
         self.log_file = log_file
 
         shuffled_roles = random.sample(ROLES, len(ROLES))
@@ -361,7 +363,7 @@ class Engine:
         )
 
     def _hitler_elected(self) -> bool:
-        if self.fascist_policies_played < 3:
+        if self.fascist_policies_played < self.hitler_election_threshold:
             return False
         if self.current_chancellor_id is None:
             return False
@@ -387,7 +389,18 @@ class Engine:
     def _build_prompt_for_agent(self, agent_id: str, action_prompt: str) -> str:
         agent = self.agents_by_id[agent_id]
 
-        game_state = f"""=== GAME STATE ===
+        rules_prompt = get_base_game_rules_prompt(
+            num_players=len(self.agents_by_id),
+            fascist_policies_to_win=self.fascist_policies_to_win,
+            liberal_policies_to_win=self.liberal_policies_to_win,
+            hitler_election_threshold=self.hitler_election_threshold,
+            num_liberal_cards=self.deck.total_liberal_cards,
+            num_fascist_cards=self.deck.total_fascist_cards,
+        )
+
+        game_state = f"""{rules_prompt}
+
+        === GAME STATE ===
         Your Agent ID: {agent_id}
         Your Role: {agent.role}
         Current President: {self.president_rotation[self.current_president_idx]}

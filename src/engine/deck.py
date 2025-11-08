@@ -7,6 +7,8 @@ class Deck:
         self.multiplier = multiplier
         self.cards: list[PolicyCard] = []
         self.discard_pile: list[PolicyCard] = []
+        self.total_fascist_cards = 11 * multiplier
+        self.total_liberal_cards = 6 * multiplier
         self._initialize_deck()
 
     def draw(self, count: int = 1) -> list[PolicyCard]:
@@ -35,10 +37,7 @@ class Deck:
         random.shuffle(self.cards)
 
     def _initialize_deck(self) -> None:
-        fascist_count = 11 * self.multiplier
-        liberal_count = 6 * self.multiplier
-
-        self.cards = [PolicyCard.FASCIST] * fascist_count + [
+        self.cards = [PolicyCard.FASCIST] * self.total_fascist_cards + [
             PolicyCard.LIBERAL
-        ] * liberal_count
+        ] * self.total_liberal_cards
         random.shuffle(self.cards)
