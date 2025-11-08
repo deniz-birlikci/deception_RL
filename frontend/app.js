@@ -1,4 +1,4 @@
-/* Secret Hitler LLM Frontend (no backend logic changed)
+/* Secret Hitler Frontend (no backend logic changed)
  - Creates/joins a local game via frontend/server.py
  - Left column: chat bubbles (table talk + answers) and game events
  - Right column: policy tracks (liberal/fascist)
@@ -24,6 +24,8 @@ const API = {
 
 let GAME_ID = null;
 let POLL_INTERVAL = null;
+let REALTIME_POLL_INTERVAL = null;
+let LAST_EVENT_COUNT = 0;
 
 function $(sel) { return document.querySelector(sel); }
 function el(tag, cls, text) {
@@ -56,18 +58,26 @@ function renderPlayers(players) {
       card.classList.add("you-player");
     }
     
-    const name = el("div", "player-name");
-    // Add indicator for "You" player
-    name.textContent = player.is_you ? `👤 ${player.name}` : player.name;
+    const nameEl = el("div", "player-name", player.name);
+    const roleEl = el("div", "player-role", player.role);
+    const titleEl = el("div", "player-title", player.title);
     
-    const role = el("div", "player-role", player.role);
+    // Add role-based color classes to header
+    if (player.role.includes("Liberal")) {
+      roleEl.classList.add("liberal");
+    } else if (player.role.includes("Fascist")) {
+      if (player.name === "Hitler") {
+        roleEl.classList.add("hitler");
+      } else {
+        roleEl.classList.add("fascist");
+      }
+    }
     
-    card.appendChild(name);
-    card.appendChild(role);
+    card.appendChild(nameEl);
+    card.appendChild(roleEl);
     
     if (player.title) {
-      const title = el("div", "player-title", player.title);
-      card.appendChild(title);
+      card.appendChild(titleEl);
     }
     
     root.appendChild(card);
@@ -125,6 +135,17 @@ function renderChat(events, players) {
       const bubble = el("div", bubbleClass);
       bubble.textContent = statement;
       
+      // Add role-based color to chat metadata
+      if (player?.role?.includes("Liberal")) {
+        meta.classList.add("liberal");
+      } else if (player?.role?.includes("Fascist")) {
+        if (player.name === "Hitler") {
+          meta.classList.add("hitler");
+        } else {
+          meta.classList.add("fascist");
+        }
+      }
+      
       messageContainer.appendChild(meta);
       messageContainer.appendChild(bubble);
       root.appendChild(messageContainer);
@@ -150,9 +171,20 @@ function renderChat(events, players) {
       const targetName = targetPlayer?.name || ev.in_response_to_agent_id;
       
       const messageContainer = el("div", "message-container");
-      const meta = el("div", "chat-meta", `${playerName} → ${targetName}`);
+      const meta = el("div", "chat-meta", `${playerName} → @${targetName}`);
       const bubble = el("div", bubbleClass);
       bubble.textContent = response;
+      
+      // Add role-based color to chat metadata
+      if (player?.role?.includes("Liberal")) {
+        meta.classList.add("liberal");
+      } else if (player?.role?.includes("Fascist")) {
+        if (player.name === "Hitler") {
+          meta.classList.add("hitler");
+        } else {
+          meta.classList.add("fascist");
+        }
+      }
       
       messageContainer.appendChild(meta);
       messageContainer.appendChild(bubble);
@@ -204,8 +236,50 @@ function renderChat(events, players) {
     }
   });
 
-  // Auto scroll to bottom
-  root.scrollTop = root.scrollHeight;
+  // Auto scroll to bottom only if user is already at the bottom
+  const isAtBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 5; // 5px tolerance
+  if (isAtBottom) {
+    root.scrollTop = root.scrollHeight;
+  }
+}
+
+function renderCardSelection(cardData) {
+  const presidentCards = document.getElementById("president-cards");
+  const chancellorCards = document.getElementById("chancellor-cards");
+  
+  // Clear existing cards
+  presidentCards.innerHTML = "";
+  chancellorCards.innerHTML = "";
+  
+  if (!cardData) return;
+  
+  // Render President's cards (3 drawn, 1 discarded)
+  if (cardData.presidentDraw) {
+    cardData.presidentDraw.forEach((card, index) => {
+      const cardEl = el("div", "policy-card");
+      cardEl.classList.add(card.type); // 'liberal' or 'fascist'
+      
+      if (card.discarded) {
+        cardEl.classList.add("discarded");
+      }
+      
+      presidentCards.appendChild(cardEl);
+    });
+  }
+  
+  // Render Chancellor's cards (2 received, 1 played)
+  if (cardData.chancellorReceive) {
+    cardData.chancellorReceive.forEach((card, index) => {
+      const cardEl = el("div", "policy-card");
+      cardEl.classList.add(card.type); // 'liberal' or 'fascist'
+      
+      if (card.played) {
+        cardEl.classList.add("played");
+      }
+      
+      chancellorCards.appendChild(cardEl);
+    });
+  }
 }
 
 function renderTracks({ liberal, fascist, liberalSlotsTotal, fascistSlotsTotal }) {
@@ -246,9 +320,49 @@ async function refreshState() {
       liberalSlotsTotal: state.liberal_policies_to_win,
       fascistSlotsTotal: state.fascist_policies_to_win
     });
+    
+    // Update event count for real-time polling
+    LAST_EVENT_COUNT = (state.events || []).length;
   } catch (err) {
     console.error(err);
   }
+}
+
+function startRealtimePolling() {
+  // Clear any existing real-time polling
+  if (REALTIME_POLL_INTERVAL) {
+    clearInterval(REALTIME_POLL_INTERVAL);
+  }
+  
+  // Poll every 500ms during active discussion
+  REALTIME_POLL_INTERVAL = setInterval(async () => {
+    if (!GAME_ID) return;
+    
+    try {
+      const state = await API.state(GAME_ID);
+      if (!state.ok) return;
+      
+      const currentEventCount = (state.events || []).length;
+      
+      // Only re-render if new events appeared
+      if (currentEventCount > LAST_EVENT_COUNT) {
+        console.log(`New events detected: ${currentEventCount - LAST_EVENT_COUNT} new messages`);
+        renderChat(state.events, state.players);
+        LAST_EVENT_COUNT = currentEventCount;
+      }
+    } catch (err) {
+      console.error("Real-time polling error:", err);
+    }
+  }, 500); // Poll every 500ms
+  
+  // Stop real-time polling after 2 minutes (discussion should be done by then)
+  setTimeout(() => {
+    if (REALTIME_POLL_INTERVAL) {
+      clearInterval(REALTIME_POLL_INTERVAL);
+      REALTIME_POLL_INTERVAL = null;
+      console.log("Real-time polling stopped");
+    }
+  }, 120000); // 2 minutes
 }
 
 function installControls() {
@@ -258,7 +372,7 @@ function installControls() {
   toolbar.style.display = "flex";
   toolbar.style.gap = "8px";
 
-  const startBtn = el("button", null, "Start Discussion");
+  const startBtn = el("button", null, "Start Game");
   startBtn.className = "game-button";
   startBtn.onclick = async () => {
     if (!GAME_ID) return;
@@ -269,18 +383,24 @@ function installControls() {
       console.log("Starting discussion round...");
       const start = Date.now();
       
-      await API.discussion(GAME_ID);
+      // Start the discussion round (non-blocking)
+      API.discussion(GAME_ID).then(() => {
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        console.log(`Discussion round completed in ${elapsed}s`);
+        startBtn.textContent = "Start Game";
+        startBtn.disabled = false;
+      }).catch(e => {
+        console.error(e);
+        startBtn.textContent = "Start Game";
+        startBtn.disabled = false;
+      });
       
-      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-      console.log(`Discussion round completed in ${elapsed}s`);
+      // Start polling for new messages immediately
+      startRealtimePolling();
       
-      await refreshState();
-      
-      startBtn.textContent = "Start Discussion";
-      startBtn.disabled = false;
     } catch (e) { 
       console.error(e);
-      startBtn.textContent = "Start Discussion";
+      startBtn.textContent = "Start Game";
       startBtn.disabled = false;
     }
   };

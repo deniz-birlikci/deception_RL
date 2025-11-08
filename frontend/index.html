@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Secret Hitler LLM - Dashboard</title>
+  <title>Secret Hitler</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app">
     <header class="app-header">
-      <h1>Secret Hitler LLM</h1>
+      <h1>Secret Hitler</h1>
       <div class="players-info" id="players-info">
         Loading players...
       </div>
@@ -19,7 +20,7 @@
     <main class="layout">
       <section class="left-pane">
         <div class="panel chat-panel">
-          <div class="panel-header">Table Discussion & Game Log</div>
+          <div class="panel-header">Game Engine</div>
           <div id="chat-list" class="chat-list"></div>
         </div>
       </section>
@@ -28,13 +29,31 @@
         <div class="panel boards-panel">
           <div class="panel-header">Policy Tracks</div>
           <div class="boards">
-            <div class="board liberal">
-              <div class="board-title">LIBERAL</div>
-              <div id="liberal-track" class="track"></div>
+            <div class="board card-selection-section">
+              <div class="card-selection-container">
+                <div class="president-selection">
+                  <div class="selection-title">President draws 3, discards 1</div>
+                  <div class="card-row" id="president-cards">
+                    <!-- President's 3 cards will be displayed here -->
+                  </div>
+                </div>
+                <div class="chancellor-selection">
+                  <div class="selection-title">Chancellor receives 2, plays 1</div>
+                  <div class="card-row" id="chancellor-cards">
+                    <!-- Chancellor's 2 cards will be displayed here -->
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="board fascist">
-              <div class="board-title">FASCIST</div>
-              <div id="fascist-track" class="track"></div>
+            <div class="board combined-tracks">
+              <div class="track-section">
+                <div class="board-title">LIBERAL</div>
+                <div id="liberal-track" class="track"></div>
+              </div>
+              <div class="track-section">
+                <div class="board-title">FASCIST</div>
+                <div id="fascist-track" class="track"></div>
+              </div>
             </div>
           </div>
         </div>
