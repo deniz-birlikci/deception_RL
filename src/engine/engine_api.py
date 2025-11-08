@@ -1,10 +1,11 @@
-import uuid
+import asyncio
 import threading
 from queue import Queue
 from typing import Dict
-from src.models import Agent, AIModel
+from src.models import AIModel
 from src.engine.engine import Engine
 from src.engine.deck import Deck
+from src.engine.protocol import ModelInput, ModelOutput
 
 DEFAULT_AI_MODELS = [
     AIModel.OPENAI_GPT_5,
@@ -21,15 +22,15 @@ class EngineAPI:
         self.engines: Dict[str, Engine] = {}
         self.threads: Dict[str, threading.Thread] = {}
 
-    def create(
+    async def create(
         self,
+        game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
         fascist_policies_to_win: int = 6,
         liberal_policies_to_win: int = 5,
         log_file: str | None = None,
-    ) -> str | list[Agent]:
-        game_id = str(uuid.uuid4())
+    ) -> ModelInput:
 
         input_queue = Queue()
         output_queue = Queue()
@@ -53,17 +54,26 @@ class EngineAPI:
         self.threads[game_id] = thread
         thread.start()
 
-        return output_queue.get()
+        # Await the initial message from the game engine
+        model_input = await asyncio.to_thread(output_queue.get)
+        assert isinstance(model_input, ModelInput)
+        return model_input
 
-    def execute(self, game_id: str, response: str | None) -> str | list[Agent]:
+    async def execute(self, game_id: str, model_output: ModelOutput) -> ModelInput:
+        # First check that the game exists
         if game_id not in self.games:
             raise ValueError(f"Game {game_id} not found")
 
+        # Obtain the input queue and output queue for the game
         input_queue, output_queue = self.games[game_id]
 
-        input_queue.put(response)
+        # Then, place the model output on the input queue
+        input_queue.put(model_output)
 
-        return output_queue.get()
+        # Await the next message from the game engine
+        model_input = await asyncio.to_thread(output_queue.get)
+        assert isinstance(model_input, ModelInput)
+        return model_input
 
     def _run_engine(
         self,

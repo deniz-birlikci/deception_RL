@@ -26,11 +26,13 @@ from src.models import (
     ToolFeedback,
     ToolResult,
 )
+from src.engine.protocol import ModelInput, ToolCallTarget, TerminalState
 from src.agent import BaseAgent
 from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
 from src.engine.external_agent_response_parser import ExternalAgentResponseParser
 from src.models import Tools
+from src.tools import OPENAI_TOOLS
 
 ROLES = [
     AgentRole.HITLER,
@@ -79,6 +81,15 @@ class Engine:
                 self.ai_agents[aid] = AgentRegistry.create_agent(
                     backend=Backend.OPENAI, ai_model=agent.ai_model
                 )
+
+
+    def _generate_terminal_state(self) -> TerminalState:
+        # TODO: check if I've won, populate it with the correct terminal state
+        return TerminalState(
+            reward=1.0 if self._get_winners() else 0.0,
+            have_won=self._get_winners(),
+        )
+
 
     def run(self, input_queue: Queue, output_queue: Queue) -> None:
         while not self._is_game_over():
@@ -186,7 +197,17 @@ class Engine:
             )
             self._log_state_to_file()
 
-        output_queue.put(self._get_winners())
+        # TODO: implement the end logic here...
+        # Game is over, generate the terminal state
+        terminal_state = self._generate_terminal_state()
+        final_model_input = ModelInput(
+            # TODO: the messages here should be the full history of the game
+            # ideally... or the model can store the history itself...
+            messages=[],
+            tool_call=None,
+            terminal_state=terminal_state,
+        )
+        output_queue.put(final_model_input)
 
     def _get_tool(
         self,
@@ -200,7 +221,31 @@ class Engine:
         full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
 
         if agent.ai_model is None:
-            output_queue.put(full_prompt)
+            tools = (
+                [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
+                if allowed_tools
+                else OPENAI_TOOLS
+            )
+
+            # Assert that there is only one tool
+            assert len(tools) == 1
+
+            # Create the tool call target
+            tool_call_target = ToolCallTarget(
+                name=tools[0]["function"]["name"],
+                openai_schema=tools[0],
+            )
+
+            # Create the new model input
+            model_input = ModelInput(
+                # TODO: fix the messages here...
+                messages=[{"role": "user", "content": full_prompt}],
+                tool_call=tool_call_target,
+                terminal_state=None,
+            )
+
+            # Place the model input back on the queue
+            output_queue.put(model_input)
             response = ExternalAgentResponseParser.parse(input_queue.get())
         else:
             user_input = UserInput(
@@ -413,3 +458,4 @@ class Engine:
         with open(self.log_file, "a") as f:
             f.write("=" * 60 + "\n")
             f.write(json.dumps(state, indent=2) + "\n")
+
