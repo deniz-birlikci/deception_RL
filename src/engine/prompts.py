@@ -1,6 +1,3 @@
-from src.models import Agent
-
-
 def get_base_game_rules_prompt(
     num_players: int,
     fascist_policies_to_win: int,

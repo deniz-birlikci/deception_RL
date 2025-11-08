@@ -399,6 +399,15 @@ class Engine:
         )
 
         game_state = f"""{rules_prompt}
+        What is Private:
+        - The reasoning tokens your produce in your response
+        - The text you produce in your response
+        - You are highly encouraged to use your reasoning to think privately about the best way to win the game
+        - Tool calls that trigger private events are private (PresidentChooseCardToDiscardTool, ChancellorPlayPolicyTool with the card you choose to discard)
+    
+        What is Public:
+        - Tool calls that trigger public events are public (PresidentPickChancellorTool, VoteChancellorYesNoTool, ChancellorPlayPolicyTool with the card you choose to play, ChooseAgentToVoteOutTool, AskAgentIfWantsToSpeakTool, AgentResponseToQuestionTool)
+        - Note: referencing some other agent in your AskAgentIfWantsToSpeakTool or responding in AgentResponseToQuestionTool are completely public and should not be used for private communication
 
         === GAME STATE ===
         Your Agent ID: {agent_id}

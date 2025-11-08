@@ -22,9 +22,15 @@ class BackendBaseSettings(BaseModel):
     base_url: str
 
 
+class OpenAIBackendSettings(BackendBaseSettings):
+    provider_order: list[str]
+    reasoning_enabled: bool
+    allow_fallbacks: bool
+
+
 class Settings(BaseSettings):
     ai: AISettings
-    openai: BackendBaseSettings
+    openai: OpenAIBackendSettings
     model_config = settings_config
 
 

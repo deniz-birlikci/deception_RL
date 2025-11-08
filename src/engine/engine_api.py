@@ -1,5 +1,6 @@
 import uuid
 import threading
+import traceback
 from queue import Queue
 from typing import Dict
 from src.models import Agent, AIModel
@@ -75,7 +76,8 @@ class EngineAPI:
         try:
             engine.run(input_queue, output_queue)
         except Exception as e:
-            output_queue.put(f"Engine error: {str(e)}")
+            tb = traceback.format_exc()
+            output_queue.put(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
         finally:
             if game_id in self.games:
                 del self.games[game_id]
