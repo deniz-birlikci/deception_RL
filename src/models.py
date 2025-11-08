@@ -8,6 +8,9 @@ class AIModel(str, Enum):
     OPENAI_GPT_5_MINI = "gpt-5-mini-2025-08-07"
     OPENAI_GPT_5_NANO = "gpt-5-nano-2025-08-07"
     OPENAI_GPT_4_1 = "gpt-4.1-2025-04-14"
+    OPENROUTER_GPT_OSS_120b = "openai/gpt-oss-120b:exacto"
+    OPENROUTER_KIMI_K2 = "moonshotai/kimi-k2-0905:exacto"
+    OPENROUTER_QWEN3_THINKING = "qwen/qwen3-235b-a22b-thinking-2507"
 
 
 class Backend(str, Enum):
@@ -169,7 +172,9 @@ class ChooseAgentToVoteOutEventPublic(EngineEvent):
 
     def __str__(self) -> str:
         if self.nominated_agent_id:
-            return f"{self.voter_id} nominated {self.nominated_agent_id} to be voted out"
+            return (
+                f"{self.voter_id} nominated {self.nominated_agent_id} to be voted out"
+            )
         return f"{self.voter_id} chose not to nominate anyone to be voted out"
 
 
@@ -180,8 +185,8 @@ class AskAgentIfWantsToSpeakEventPublic(EngineEvent):
 
     def __str__(self) -> str:
         if self.ask_directed_question_to_agent_id:
-            return f"{self.agent_id} asked {self.ask_directed_question_to_agent_id}: \"{self.question_or_statement}\""
-        return f"{self.agent_id} said: \"{self.question_or_statement}\""
+            return f'{self.agent_id} asked {self.ask_directed_question_to_agent_id}: "{self.question_or_statement}"'
+        return f'{self.agent_id} said: "{self.question_or_statement}"'
 
 
 class AgentResponseToQuestioningEventPublic(EngineEvent):
@@ -190,7 +195,7 @@ class AgentResponseToQuestioningEventPublic(EngineEvent):
     response: str
 
     def __str__(self) -> str:
-        return f"{self.agent_id} responded to {self.in_response_to_agent_id}: \"{self.response}\""
+        return f'{self.agent_id} responded to {self.in_response_to_agent_id}: "{self.response}"'
 
 
 class PresidentChooseCardToDiscardEventPrivate(EngineEvent):

@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from asyncio import Queue
 from typing import Dict
 from src.models import AIModel
@@ -82,7 +83,8 @@ class EngineAPI:
         try:
             await engine.run(input_queue, output_queue)
         except Exception as e:
-            await output_queue.put(f"Engine error: {str(e)}")
+            tb = traceback.format_exc()
+            await output_queue.put(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
         finally:
             if game_id in self.games:
                 del self.games[game_id]

@@ -48,4 +48,6 @@ class OpenAIAgent(BaseAgent):
             tool_choice="required",
         )
 
+        print(response.model_dump())
+
         return self.assistant_response_converter.from_dict(data=response.model_dump())
