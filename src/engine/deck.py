@@ -23,8 +23,8 @@ class Deck:
         return len(self.cards)
 
     def _initialize_deck(self) -> None:
-        fascist_count = 6 * self.multiplier
-        liberal_count = 11 * self.multiplier
+        fascist_count = 11 * self.multiplier
+        liberal_count = 6 * self.multiplier
 
         self.cards = [PolicyCard.FASCIST] * fascist_count + [
             PolicyCard.LIBERAL
