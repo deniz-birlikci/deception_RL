@@ -44,7 +44,7 @@ class BaseAgent(ABC):
         )
 
     @abstractmethod
-    def generate_response(
+    async def generate_response(
         self, message_history: list[MessageHistory], allowed_tools: list[str] | None = None
     ) -> AssistantResponse: ...
 

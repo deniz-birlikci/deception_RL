@@ -1,6 +1,5 @@
 import asyncio
-import threading
-from queue import Queue
+from asyncio import Queue
 from typing import Dict
 from src.models import AIModel
 from src.engine.engine import Engine
@@ -20,7 +19,7 @@ class EngineAPI:
     def __init__(self):
         self.games: Dict[str, tuple[Queue, Queue]] = {}
         self.engines: Dict[str, Engine] = {}
-        self.threads: Dict[str, threading.Thread] = {}
+        self.tasks: Dict[str, asyncio.Task] = {}
 
     async def create(
         self,
@@ -32,8 +31,8 @@ class EngineAPI:
         log_file: str | None = None,
     ) -> ModelInput:
 
-        input_queue = Queue()
-        output_queue = Queue()
+        input_queue: Queue = Queue()
+        output_queue: Queue = Queue()
 
         self.games[game_id] = (input_queue, output_queue)
 
@@ -46,16 +45,14 @@ class EngineAPI:
         )
         self.engines[game_id] = engine
 
-        thread = threading.Thread(
-            target=self._run_engine,
-            args=(game_id, engine, input_queue, output_queue),
-            daemon=True,
+        # Create asyncio task instead of thread
+        task = asyncio.create_task(
+            self._run_engine(game_id, engine, input_queue, output_queue)
         )
-        self.threads[game_id] = thread
-        thread.start()
+        self.tasks[game_id] = task
 
         # Await the initial message from the game engine
-        model_input = await asyncio.to_thread(output_queue.get)
+        model_input = await output_queue.get()
         assert isinstance(model_input, ModelInput)
         return model_input
 
@@ -68,14 +65,14 @@ class EngineAPI:
         input_queue, output_queue = self.games[game_id]
 
         # Then, place the model output on the input queue
-        input_queue.put(model_output)
+        await input_queue.put(model_output)
 
         # Await the next message from the game engine
-        model_input = await asyncio.to_thread(output_queue.get)
+        model_input = await output_queue.get()
         assert isinstance(model_input, ModelInput)
         return model_input
 
-    def _run_engine(
+    async def _run_engine(
         self,
         game_id: str,
         engine: Engine,
@@ -83,16 +80,16 @@ class EngineAPI:
         output_queue: Queue,
     ) -> None:
         try:
-            engine.run(input_queue, output_queue)
+            await engine.run(input_queue, output_queue)
         except Exception as e:
-            output_queue.put(f"Engine error: {str(e)}")
+            await output_queue.put(f"Engine error: {str(e)}")
         finally:
             if game_id in self.games:
                 del self.games[game_id]
             if game_id in self.engines:
                 del self.engines[game_id]
-            if game_id in self.threads:
-                del self.threads[game_id]
+            if game_id in self.tasks:
+                del self.tasks[game_id]
 
     def get_game_ids(self) -> list[str]:
         return list(self.games.keys())
