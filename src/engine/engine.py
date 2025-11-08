@@ -46,12 +46,14 @@ class Engine:
         self,
         deck: Deck,
         ai_models: list[AIModel | None],
-        fascist_policies_to_win: int = 6,
-        liberal_policies_to_win: int = 5,
+        fascist_policies_to_win: int,
+        liberal_policies_to_win: int,
+        verbose: bool,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
+        self.verbose = verbose
 
         shuffled_roles = random.sample(ROLES, len(ROLES))
         agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
@@ -78,8 +80,20 @@ class Engine:
                 )
 
     def run(self, input_queue: Queue, output_queue: Queue) -> None:
+        if self.verbose:
+            print("\n=== GAME STARTING ===")
+            print(f"Agents: {list(self.agents_by_id.keys())}")
+            print(f"President rotation: {self.president_rotation}")
+            print()
+
         while not self._is_game_over():
             president_id = self.president_rotation[self.current_president_idx]
+
+            if self.verbose:
+                print(
+                    f"\n--- Round {len([e for e in self.public_events if isinstance(e, PresidentPickChancellorEventPublic)]) + 1} ---"
+                )
+                print(f"President: {president_id}")
 
             tool = cast(
                 PresidentPickChancellorTool,
@@ -98,17 +112,35 @@ class Engine:
                 )
             )
 
+            if self.verbose:
+                print(f"Chancellor nominated: {chancellor_id}")
+
+            if self.verbose:
+                print("Discourse phase (pre-vote)...")
+
             self._discourse(input_queue, output_queue)
 
+            if self.verbose:
+                print("Voting on chancellor...")
+
             if not self._vote(chancellor_id, input_queue, output_queue):
+                if self.verbose:
+                    print("Vote failed! Moving to next president.")
                 self.current_president_idx = (self.current_president_idx + 1) % len(
                     self.president_rotation
                 )
                 continue
 
+            if self.verbose:
+                print("Vote passed! Chancellor elected.")
+
             self.current_chancellor_id = chancellor_id
 
             cards = self.deck.draw(3)
+
+            if self.verbose:
+                print(f"President drew 3 cards: {cards}")
+
             tool = cast(
                 PresidentChooseCardToDiscardTool,
                 self._get_tool(
@@ -121,6 +153,10 @@ class Engine:
             )
             idx = tool.card_index
             discarded = cards.pop(idx)
+
+            if self.verbose:
+                print(f"President discarded: {discarded}, passed: {cards}")
+
             self.private_events_by_agent[president_id].append(
                 PresidentChooseCardToDiscardEventPrivate(
                     president_id=president_id,
@@ -155,17 +191,34 @@ class Engine:
                 )
             )
 
+            if self.verbose:
+                print(f"Chancellor played: {played}")
+
             if played == PolicyCard.FASCIST:
                 self.fascist_policies_played += 1
             else:
                 self.liberal_policies_played += 1
+
+            if self.verbose:
+                print(
+                    f"Score - Fascist: {self.fascist_policies_played}/{self.fascist_policies_to_win}, Liberal: {self.liberal_policies_played}/{self.liberal_policies_to_win}"
+                )
+                print("Discourse phase (post-policy)...")
 
             self._discourse(input_queue, output_queue)
             self.current_president_idx = (self.current_president_idx + 1) % len(
                 self.president_rotation
             )
 
-        output_queue.put(self._get_winners())
+        winners = self._get_winners()
+        if self.verbose:
+            print("\n=== GAME OVER ===")
+            print(f"Winners: {[f'{w.agent_id} ({w.role})' for w in winners]}")
+            print(
+                f"Final Score - Fascist: {self.fascist_policies_played}/{self.fascist_policies_to_win}, Liberal: {self.liberal_policies_played}/{self.liberal_policies_to_win}"
+            )
+
+        output_queue.put(winners)
 
     def _get_tool(
         self,

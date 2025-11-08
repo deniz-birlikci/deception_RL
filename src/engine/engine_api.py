@@ -27,6 +27,7 @@ class EngineAPI:
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
         fascist_policies_to_win: int = 6,
         liberal_policies_to_win: int = 5,
+        verbose: bool = False,
     ) -> str | list[Agent]:
         game_id = str(uuid.uuid4())
 
@@ -40,6 +41,7 @@ class EngineAPI:
             ai_models=ai_models,
             fascist_policies_to_win=fascist_policies_to_win,
             liberal_policies_to_win=liberal_policies_to_win,
+            verbose=verbose,
         )
         self.engines[game_id] = engine
 
