@@ -8,6 +8,7 @@ dependencies = [
     "modal>=1.2.1",
     "numpy>=2.3.4",
     "openai>=2.7.1",
+    "omegaconf>=2.3.0",
     "openpipe-art>=0.4.5",
     "polars>=1.35.1",
     "pydantic>=2.12.4",
