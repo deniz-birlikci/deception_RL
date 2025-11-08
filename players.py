@@ -1,35 +1,35 @@
 from dataclasses import dataclass, field
 from enum import Enum
 import random
+from typing import Callable
+
 
 class Role(Enum):
     LIBERAL = "Liberal"
     FASCIST = "Fascist"
-    HITLER  = "Hitler"
+    HITLER = "Hitler"
+
 
 @dataclass
 class LLMPlayer:
     name: str
-    llm_fn: callable     
+    llm_fn: Callable
     role: Role = None
     sees: list[str] = field(default_factory=list)
 
+
 # --- Create 5 LLM players ---
-def setup_5_players(llm_functions: list[callable]):
+def setup_5_players(llm_functions: list[Callable]):
     """
     llm_functions: a list of 5 callables (each is an LLM interface).
     Returns: list of LLMPlayer with roles assigned + secret info.
     """
 
-    players = [LLMPlayer(name=f"P{i+1}", llm_fn=llm) for i, llm in enumerate(llm_functions)]
-
-    deck = [
-        Role.LIBERAL,
-        Role.LIBERAL,
-        Role.LIBERAL,
-        Role.FASCIST,
-        Role.HITLER
+    players = [
+        LLMPlayer(name=f"P{i+1}", llm_fn=llm) for i, llm in enumerate(llm_functions)
     ]
+
+    deck = [Role.LIBERAL, Role.LIBERAL, Role.LIBERAL, Role.FASCIST, Role.HITLER]
     random.shuffle(deck)
 
     for p, r in zip(players, deck):
@@ -40,7 +40,7 @@ def setup_5_players(llm_functions: list[callable]):
     # • Hitler **knows the Fascist in 5p**
     # • Liberals know nothing
     fascist = [p for p in players if p.role == Role.FASCIST]
-    hitler   = [p for p in players if p.role == Role.HITLER][0]
+    hitler = [p for p in players if p.role == Role.HITLER][0]
 
     # Fascist sees Hitler
     if fascist:
@@ -51,4 +51,3 @@ def setup_5_players(llm_functions: list[callable]):
     hitler.sees = [fascist[0].name] if fascist else []
 
     return players
-
