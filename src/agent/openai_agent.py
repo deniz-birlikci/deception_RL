@@ -41,7 +41,7 @@ class OpenAIAgent(BaseAgent):
 
         tools = generate_tools(allowed_tools, eligible_agent_ids)
 
-        response = self.client.chat.completions.create(
+        response = await self.client.chat.completions.create(
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
             tools=cast(list[ChatCompletionToolUnionParam], tools),
