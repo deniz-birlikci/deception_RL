@@ -1,0 +1,12 @@
+# OpenRouter API Key (for model inference)
+# Get from: https://openrouter.ai/
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+# AWS Credentials (for S3 checkpoint storage)
+AWS_ACCESS_KEY_ID=your_aws_access_key_here
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
+
+# Optional: Weights & Biases (for experiment tracking)
+# Get from: https://wandb.ai/
+WANDB_API_KEY=your_wandb_api_key_here
+

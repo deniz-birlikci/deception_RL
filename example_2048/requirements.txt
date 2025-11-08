@@ -1,0 +1,10 @@
+# Core dependencies
+openpipe-art[backend]
+python-dotenv
+openai>=1.65.5
+requests
+weave>=0.51.51
+
+# Modal Labs
+modal
+
