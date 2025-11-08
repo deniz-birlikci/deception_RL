@@ -27,7 +27,7 @@ class EngineAPI:
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
         fascist_policies_to_win: int = 6,
         liberal_policies_to_win: int = 5,
-    ) -> str | Agent:
+    ) -> str | list[Agent]:
         game_id = str(uuid.uuid4())
 
         input_queue = Queue()
@@ -53,7 +53,7 @@ class EngineAPI:
 
         return output_queue.get()
 
-    def execute(self, game_id: str, response: str | None) -> str | Agent:
+    def execute(self, game_id: str, response: str | None) -> str | list[Agent]:
         if game_id not in self.games:
             raise ValueError(f"Game {game_id} not found")
 

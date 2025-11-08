@@ -63,6 +63,7 @@ class Engine:
         self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
         self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
         self.current_president_idx: int = 0
+        self.current_chancellor_id: str | None = None
         self.fascist_policies_played: int = 0
         self.liberal_policies_played: int = 0
         self.public_events: list = []
@@ -104,6 +105,8 @@ class Engine:
                     self.president_rotation
                 )
                 continue
+
+            self.current_chancellor_id = chancellor_id
 
             cards = self.deck.draw(3)
             tool = cast(
@@ -162,40 +165,33 @@ class Engine:
                 self.president_rotation
             )
 
-        output_queue.put(
-            "Game Over: Fascists win!"
-            if self.fascist_policies_played >= self.fascist_policies_to_win
-            else "Game Over: Liberals win!"
-        )
+        output_queue.put(self._get_winners())
 
     def _get_tool(
         self,
         agent_id: str,
-        prompt: str,
+        prompt_guidance: str,
         input_queue: Queue,
         output_queue: Queue,
         allowed_tools: list[str] | None = None,
     ) -> Tools:
         agent = self.agents_by_id[agent_id]
-        full_prompt = f"Agent {agent_id}, Role: {agent.role}\n{prompt}"
+        full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
 
         if agent.ai_model is None:
             output_queue.put(full_prompt)
-            return ExternalAgentResponseParser.parse(
-                input_queue.get()
-            ).hydrated_tool_calls[0]
-
-        user_input = UserInput(
-            history_type="user-input",
-            user_message=full_prompt,
-            timestamp=str(uuid.uuid4()),
-        )
-        self.msg_history[agent_id].append(user_input)
-
-        response = self.ai_agents[agent_id].generate_response(
-            self.msg_history[agent_id], allowed_tools=allowed_tools
-        )
-        self.msg_history[agent_id].append(response)
+            response = ExternalAgentResponseParser.parse(input_queue.get())
+        else:
+            user_input = UserInput(
+                history_type="user-input",
+                user_message=full_prompt,
+                timestamp=str(uuid.uuid4()),
+            )
+            self.msg_history[agent_id].append(user_input)
+            response = self.ai_agents[agent_id].generate_response(
+                self.msg_history[agent_id], allowed_tools=allowed_tools
+            )
+            self.msg_history[agent_id].append(response)
 
         feedback = ToolFeedback(
             history_type="tool-feedback",
@@ -286,4 +282,75 @@ class Engine:
         return (
             self.fascist_policies_played >= self.fascist_policies_to_win
             or self.liberal_policies_played >= self.liberal_policies_to_win
+            or self._hitler_elected()
+        )
+
+    def _hitler_elected(self) -> bool:
+        if self.fascist_policies_played < 3:
+            return False
+        if self.current_chancellor_id is None:
+            return False
+        return self.agents_by_id[self.current_chancellor_id].role == AgentRole.HITLER
+
+    def _get_winners(self) -> list[Agent]:
+        if (
+            self.fascist_policies_played >= self.fascist_policies_to_win
+            or self._hitler_elected()
+        ):
+            return [
+                agent
+                for agent in self.agents_by_id.values()
+                if agent.role in [AgentRole.HITLER, AgentRole.FASCIST]
+            ]
+        else:
+            return [
+                agent
+                for agent in self.agents_by_id.values()
+                if agent.role == AgentRole.LIBERAL
+            ]
+
+    def _build_prompt_for_agent(self, agent_id: str, action_prompt: str) -> str:
+        agent = self.agents_by_id[agent_id]
+
+        game_state = f"""=== GAME STATE ===
+        Your Agent ID: {agent_id}
+        Your Role: {agent.role}
+        Current President: {self.president_rotation[self.current_president_idx]}
+        Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else 'None'}
+        Fascist Policies Played: {self.fascist_policies_played}/{self.fascist_policies_to_win}
+        Liberal Policies Played: {self.liberal_policies_played}/{self.liberal_policies_to_win}
+
+        All Agents: {list(self.agents_by_id.keys())}
+        """
+
+        public_events_str = "\n=== PUBLIC EVENTS ===\n"
+        if self.public_events:
+            for i, event in enumerate(self.public_events, 1):
+                public_events_str += f"{i}. {event}\n"
+        else:
+            public_events_str += "No public events yet.\n"
+
+        private_events_str = "\n=== YOUR PRIVATE EVENTS ===\n"
+        if self.private_events_by_agent[agent_id]:
+            for i, event in enumerate(self.private_events_by_agent[agent_id], 1):
+                private_events_str += f"{i}. {event}\n"
+        else:
+            private_events_str += "No private events yet.\n"
+
+        fascist_info_str = ""
+        fascist_ids = [
+            aid
+            for aid, a in self.agents_by_id.items()
+            if a.role in [AgentRole.FASCIST, AgentRole.HITLER] and aid != agent_id
+        ]
+        if agent.role == AgentRole.FASCIST:
+            fascist_info_str = f"\n=== FELLOW FASCISTS ===\n{fascist_ids}\n"
+
+        action_str = f"\n=== ACTION REQUIRED ===\n{action_prompt}\n"
+        return (
+            game_state
+            + public_events_str
+            + private_events_str
+            + fascist_info_str
+            + action_str
         )
