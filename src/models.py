@@ -48,12 +48,27 @@ class ChooseAgentToVoteOutTool(_ToolBase[Literal["choose-agent-to-vote-out"]]):
     agent_id: str | None
 
 
+class AskAgentIfWantsToSpeakTool(_ToolBase[Literal["ask-agent-if-wants-to-speak"]]):
+    tool_type: Literal["ask-agent-if-wants-to-speak"]
+    question_or_statement: str | None
+    ask_directed_question_to_agent_id: str | None
+
+
+class AgentResponseToQuestionTool(
+    _ToolBase[Literal["agent-response-to-question-tool"]]
+):
+    tool_type: Literal["agent-response-to-question-tool"]
+    response: str
+
+
 Tools = Annotated[
     PresidentPickChancellorTool
     | VoteChancellorYesNoTool
     | PresidentChooseCardToDiscardTool
     | ChancellorPlayPolicyTool
-    | ChooseAgentToVoteOutTool,
+    | ChooseAgentToVoteOutTool
+    | AskAgentIfWantsToSpeakTool
+    | AgentResponseToQuestionTool,
     Field(discriminator="tool_type"),
 ]
 
@@ -107,3 +122,66 @@ MessageHistory = Annotated[
     ToolFeedback | UserInput | AssistantResponse,
     Field(discriminator="history_type"),
 ]
+
+
+class AgentRole(str, Enum):
+    LIBERAL = "liberal"
+    FASCIST = "fascist"
+    HITLER = "hitler"
+
+
+class Agent(BaseModel):
+    agent_id: str
+    role: AgentRole
+    ai_model: AIModel | None = None
+
+
+class PolicyCard(str, Enum):
+    LIBERAL = "liberal"
+    FASCIST = "fascist"
+
+
+class PresidentPickChancellorEventPublic(BaseModel):
+    president_id: str
+    chancellor_id: str
+
+
+class VoteChancellorYesNoEventPublic(BaseModel):
+    voter_id: str
+    chancellor_nominee_id: str
+    vote: bool
+
+
+class ChooseAgentToVoteOutEventPublic(BaseModel):
+    voter_id: str
+    nominated_agent_id: str | None
+
+
+class AskAgentIfWantsToSpeakEventPublic(BaseModel):
+    agent_id: str
+    question_or_statement: str | None
+    ask_directed_question_to_agent_id: str | None
+
+
+class AgentResponseToQuestioningEventPublic(BaseModel):
+    agent_id: str
+    in_response_to_agent_id: str
+    response: str
+
+
+class PresidentChooseCardToDiscardEventPrivate(BaseModel):
+    president_id: str
+    cards_drawn: list[PolicyCard]
+    card_discarded: PolicyCard
+
+
+class ChancellorReceivePoliciesEventPrivate(BaseModel):
+    chancellor_id: str
+    president_id_received_from: str
+    cards_received: list[PolicyCard]
+    card_discarded: PolicyCard
+
+
+class ChancellorPlayPolicyEventPublic(BaseModel):
+    chancellor_id: str
+    card_played: PolicyCard

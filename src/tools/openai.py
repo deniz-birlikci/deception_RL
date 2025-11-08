@@ -4,11 +4,15 @@ from .tools import (
     PRESIDENT_CHOOSE_CARD_TO_DISCARD_PARAMS,
     CHANCELLOR_PLAY_POLICY_PARAMS,
     CHOOSE_AGENT_TO_VOTE_OUT_PARAMS,
+    ASK_AGENT_IF_WANTS_TO_SPEAK_PARAMS,
+    AGENT_RESPONSE_TO_QUESTION_PARAMS,
     PRESIDENT_PICK_CHANCELLOR_DESC,
     VOTE_CHANCELLOR_YES_NO_DESC,
     PRESIDENT_CHOOSE_CARD_TO_DISCARD_DESC,
     CHANCELLOR_PLAY_POLICY_DESC,
     CHOOSE_AGENT_TO_VOTE_OUT_DESC,
+    ASK_AGENT_IF_WANTS_TO_SPEAK_DESC,
+    AGENT_RESPONSE_TO_QUESTION_DESC,
 )
 
 
@@ -56,6 +60,24 @@ TOOLS = [
             "description": CHOOSE_AGENT_TO_VOTE_OUT_DESC,
             "strict": True,
             "parameters": CHOOSE_AGENT_TO_VOTE_OUT_PARAMS,
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask-agent-if-wants-to-speak",
+            "description": ASK_AGENT_IF_WANTS_TO_SPEAK_DESC,
+            "strict": True,
+            "parameters": ASK_AGENT_IF_WANTS_TO_SPEAK_PARAMS,
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent-response-to-question-tool",
+            "description": AGENT_RESPONSE_TO_QUESTION_DESC,
+            "strict": True,
+            "parameters": AGENT_RESPONSE_TO_QUESTION_PARAMS,
         },
     },
 ]

@@ -12,6 +12,8 @@ from ..models import (
     PresidentChooseCardToDiscardTool,
     ChancellorPlayPolicyTool,
     ChooseAgentToVoteOutTool,
+    AskAgentIfWantsToSpeakTool,
+    AgentResponseToQuestionTool,
 )
 from .model_converter_protocols import DictConverter, ListDictConverter
 from ..env import settings
@@ -29,6 +31,12 @@ from .generic.chancellor_play_policy_tool_converter import (
 )
 from .generic.choose_agent_to_vote_out_tool_converter import (
     ChooseAgentToVoteOutToolConverter,
+)
+from .generic.ask_agent_if_wants_to_speak_tool_converter import (
+    AskAgentIfWantsToSpeakToolConverter,
+)
+from .generic.agent_response_to_question_tool_converter import (
+    AgentResponseToQuestionToolConverter,
 )
 
 
@@ -83,3 +91,13 @@ class BaseModelConverterFactory(ABC):
         self,
     ) -> DictConverter[ChooseAgentToVoteOutTool]:
         return ChooseAgentToVoteOutToolConverter()
+
+    def create_ask_agent_if_wants_to_speak_tool_converter(
+        self,
+    ) -> DictConverter[AskAgentIfWantsToSpeakTool]:
+        return AskAgentIfWantsToSpeakToolConverter()
+
+    def create_agent_response_to_question_tool_converter(
+        self,
+    ) -> DictConverter[AgentResponseToQuestionTool]:
+        return AgentResponseToQuestionToolConverter()

@@ -1,6 +1,6 @@
 from .agent import AgentRegistry
 from .env import settings
-from .models import UserInput
+from .models import UserInput, AIModel
 import time
 
 
@@ -8,6 +8,7 @@ def main():
 
     agent = AgentRegistry.create_agent(
         backend=settings.ai.backend,
+        ai_model=AIModel.OPENAI_GPT_5
     )
 
     response = agent.generate_response(

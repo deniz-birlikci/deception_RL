@@ -31,6 +31,16 @@ OPTIONAL_AGENT_ID_PROPERTY = {
     ),
 }
 
+OPTIONAL_STRING_PROPERTY = {
+    "type": ["string", "null"],
+    "description": "An optional string value, or null if not provided.",
+}
+
+STRING_PROPERTY = {
+    "type": "string",
+    "description": "A string value.",
+}
+
 
 PRESIDENT_PICK_CHANCELLOR_PARAMS = {
     "type": "object",
@@ -77,6 +87,25 @@ CHOOSE_AGENT_TO_VOTE_OUT_PARAMS = {
     "additionalProperties": False,
 }
 
+ASK_AGENT_IF_WANTS_TO_SPEAK_PARAMS = {
+    "type": "object",
+    "properties": {
+        "question_or_statement": OPTIONAL_STRING_PROPERTY,
+        "ask_directed_question_to_agent_id": OPTIONAL_AGENT_ID_PROPERTY,
+    },
+    "required": ["question_or_statement", "ask_directed_question_to_agent_id"],
+    "additionalProperties": False,
+}
+
+AGENT_RESPONSE_TO_QUESTION_PARAMS = {
+    "type": "object",
+    "properties": {
+        "response": STRING_PROPERTY,
+    },
+    "required": ["response"],
+    "additionalProperties": False,
+}
+
 
 PRESIDENT_PICK_CHANCELLOR_DESC = (
     "As the President, nominate a player to be Chancellor for this round. "
@@ -112,4 +141,14 @@ CHOOSE_AGENT_TO_VOTE_OUT_DESC = (
     "to use this power (if allowed by game rules). Executed players are revealed and "
     "removed from the game permanently. Use this power to eliminate suspected fascists "
     "or to create confusion and mistrust among liberals."
+)
+
+ASK_AGENT_IF_WANTS_TO_SPEAK_DESC = (
+    "Indicate if you want to speak during the discourse phase. "
+    "Optionally provide a question_or_statement you want to make, and/or specify "
+    "an ask_directed_question_to_agent_id to direct your question to a specific agent."
+)
+
+AGENT_RESPONSE_TO_QUESTION_DESC = (
+    "Respond to a question or statement that was directed at you during the discourse phase."
 )

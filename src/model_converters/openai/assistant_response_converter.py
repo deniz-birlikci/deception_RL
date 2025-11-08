@@ -9,6 +9,8 @@ from ...models import (
     PresidentChooseCardToDiscardTool,
     ChancellorPlayPolicyTool,
     ChooseAgentToVoteOutTool,
+    AskAgentIfWantsToSpeakTool,
+    AgentResponseToQuestionTool,
 )
 from ..model_converter_protocols import DictConverter
 from .tool_call_converter import OpenAIToolCallConverter
@@ -26,6 +28,12 @@ from ..generic.chancellor_play_policy_tool_converter import (
 )
 from ..generic.choose_agent_to_vote_out_tool_converter import (
     ChooseAgentToVoteOutToolConverter,
+)
+from ..generic.ask_agent_if_wants_to_speak_tool_converter import (
+    AskAgentIfWantsToSpeakToolConverter,
+)
+from ..generic.agent_response_to_question_tool_converter import (
+    AgentResponseToQuestionToolConverter,
 )
 from ...env import settings
 
@@ -51,6 +59,12 @@ class OpenAIAssistantResponseConverter:
         choose_agent_to_vote_out_tool_converter: (
             DictConverter[ChooseAgentToVoteOutTool] | None
         ) = None,
+        ask_agent_if_wants_to_speak_tool_converter: (
+            DictConverter[AskAgentIfWantsToSpeakTool] | None
+        ) = None,
+        agent_response_to_question_tool_converter: (
+            DictConverter[AgentResponseToQuestionTool] | None
+        ) = None,
     ) -> None:
         self.ai_model = ai_model or settings.ai.model_id
 
@@ -72,6 +86,14 @@ class OpenAIAssistantResponseConverter:
         self.choose_agent_to_vote_out_tool_converter = (
             choose_agent_to_vote_out_tool_converter
             or ChooseAgentToVoteOutToolConverter()
+        )
+        self.ask_agent_if_wants_to_speak_tool_converter = (
+            ask_agent_if_wants_to_speak_tool_converter
+            or AskAgentIfWantsToSpeakToolConverter()
+        )
+        self.agent_response_to_question_tool_converter = (
+            agent_response_to_question_tool_converter
+            or AgentResponseToQuestionToolConverter()
         )
 
     def to_list_dict(self, data: AssistantResponse) -> list[dict]:
@@ -120,6 +142,14 @@ class OpenAIAssistantResponseConverter:
             return self.chancellor_play_policy_tool_converter.from_dict(tool_call.input)
         elif tool_call.tool_name == "choose-agent-to-vote-out":
             return self.choose_agent_to_vote_out_tool_converter.from_dict(
+                tool_call.input
+            )
+        elif tool_call.tool_name == "ask-agent-if-wants-to-speak":
+            return self.ask_agent_if_wants_to_speak_tool_converter.from_dict(
+                tool_call.input
+            )
+        elif tool_call.tool_name == "agent-response-to-question-tool":
+            return self.agent_response_to_question_tool_converter.from_dict(
                 tool_call.input
             )
         else:
