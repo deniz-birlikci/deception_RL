@@ -99,16 +99,19 @@ class Engine:
                     president_id=president_id, chancellor_id=chancellor_id
                 )
             )
+            self._log_state_to_file()
 
             self._discourse(input_queue, output_queue)
+            self._log_state_to_file()
 
             if not self._vote(chancellor_id, input_queue, output_queue):
                 self.current_president_idx = (self.current_president_idx + 1) % len(
                     self.president_rotation
                 )
+                self._log_state_to_file()
                 continue
-
             self.current_chancellor_id = chancellor_id
+            self._log_state_to_file()
 
             cards = self.deck.draw(3)
             tool = cast(
@@ -131,6 +134,7 @@ class Engine:
                     card_discarded=discarded,
                 )
             )
+            self._log_state_to_file()
 
             tool = cast(
                 ChancellorPlayPolicyTool,
@@ -157,6 +161,7 @@ class Engine:
                     chancellor_id=chancellor_id, card_played=played
                 )
             )
+            self._log_state_to_file()
 
             if played == PolicyCard.FASCIST:
                 self.fascist_policies_played += 1
@@ -164,10 +169,11 @@ class Engine:
                 self.liberal_policies_played += 1
 
             self._discourse(input_queue, output_queue)
+            self._log_state_to_file()
+
             self.current_president_idx = (self.current_president_idx + 1) % len(
                 self.president_rotation
             )
-
             self._log_state_to_file()
 
         output_queue.put(self._get_winners())
