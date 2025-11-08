@@ -55,10 +55,10 @@ class OpenAIAgent(BaseAgent):
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
             tools=cast(list[ChatCompletionToolUnionParam], OPENAI_TOOLS),
-            extra_body={
-                "provider": provider_dict,
-                "reasoning": {"enabled": self.reasoning_enabled},
-            },
+            # extra_body={
+            #     "provider": provider_dict,
+            #     "reasoning": {"enabled": self.reasoning_enabled},
+            # },
         )
 
         return self.assistant_response_converter.from_dict(data=response.model_dump())

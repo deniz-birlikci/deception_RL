@@ -1,5 +1,26 @@
+from .agent import AgentRegistry
+from .env import settings
+from .models import UserInput
+import time
+
+
 def main():
-    print("Hello from rl-secret-hitler!")
+
+    agent = AgentRegistry.create_agent(
+        backend=settings.ai.backend,
+    )
+
+    response = agent.generate_response(
+        [
+            UserInput(
+                history_type="user-input",
+                timestamp=str(int(time.time() * 1000)),
+                user_message="call the president choose card to discoard tool with card index 1",
+            )
+        ]
+    )
+
+    print(response)
 
 
 if __name__ == "__main__":

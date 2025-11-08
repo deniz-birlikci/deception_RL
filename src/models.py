@@ -4,19 +4,10 @@ from typing import Literal, Annotated, TypeVar, Generic
 
 
 class AIModel(str, Enum):
-    OPENROUTER_GLM_4_5V = "z-ai/glm-4.5v"
-    OPENROUTER_QWEN3_VL_235B_A22B_INSTRUCT = "qwen/qwen3-vl-235b-a22b-instruct"
-    OPENROUTER_CLAUDE_SONNET_4_5 = "anthropic/claude-sonnet-4.5"
-    OPENROUTER_GROK_4_FAST = "x-ai/grok-4-fast"
-    OPENROUTER_GPT_5_CODEX = "openai/gpt-5-codex"
-    OPENROUTER_GEMINI_2_5_FLASH_LITE = "google/gemini-2.5-flash-lite"
-    OPENROUTER_LLAMA_4_MAVERICK = "meta-llama/llama-4-maverick"
-    OPENROUTER_GPT_5 = "openai/gpt-5"
-    OPENROUTER_GPT_5_MINI = "openai/gpt-5-mini"
-    OPENROUTER_GPT_4_1 = "openai/gpt-4.1"
-    OPENROUTER_GPT_4o = "openai/gpt-4o"
-    OPENROUTER_CLAUDE_3_5_HAIKU = "anthropic/claude-3.5-haiku"
-    OPENROUTER_GEMINI_2_5_PRO = "google/gemini-2.5-pro"
+    OPENAI_GPT_5 = "gpt-5-2025-08-07"
+    OPENAI_GPT_5_MINI = "gpt-5-mini-2025-08-07"
+    OPENAI_GPT_5_NANO = "gpt-5-nano-2025-08-07"
+    OPENAI_GPT_4_1 = "gpt-4.1-2025-04-14"
 
 
 class Backend(str, Enum):
