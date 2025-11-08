@@ -1,25 +1,38 @@
 import json
 import uuid
 from src.models import AssistantResponse, ToolCall, Tools
+from src.engine.protocol import ModelOutput
 
 
 class ExternalAgentResponseParser:
 
     @staticmethod
-    def parse(response: str) -> AssistantResponse:
+    def parse(model_output: ModelOutput) -> AssistantResponse:
         """
-        Parse a JSON string response into an AssistantResponse object.
-
-        Expected format:
+        Parse a ModelOutput into an AssistantResponse object.
+        
+        The ModelOutput should contain:
+        - function_calling_json: JSON string with tool_name and arguments
+        - reasoning: Optional reasoning/thinking from the model
+        
+        Expected function_calling_json format:
         {
             "tool_name": "president-pick-chancellor",
             "arguments": {"agent_id": "..."}
         }
+        
+        The reasoning field from ModelOutput will be included in the 
+        AssistantResponse for logging/debugging purposes.
         """
+        # Obtain the function calling JSON and reasoning from the model output
+        function_calling_json = model_output.function_calling_json
+        reasoning = model_output.reasoning
+
+        # Try to parse the function calling JSON
         try:
-            data = json.loads(response)
+            data = json.loads(function_calling_json)
         except json.JSONDecodeError:
-            raise ValueError(f"Invalid JSON response: {response}")
+            raise ValueError(f"Invalid JSON response: {function_calling_json}")
 
         tool_name = data.get("tool_name")
         arguments = data.get("arguments", {})
@@ -37,7 +50,7 @@ class ExternalAgentResponseParser:
 
         return AssistantResponse(
             history_type="assistant-response",
-            reasoning=None,
+            reasoning=reasoning or None,
             text_response=None,
             tool_calls=[tool_call],
             hydrated_tool_calls=[hydrated_tool],
