@@ -31,34 +31,23 @@ class OpenAIAgent(BaseAgent):
         self.base_url = self.base_url or settings.openai.base_url
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
-        self.provider_order = kwargs.get(
-            "provider_order", settings.openai.provider_order
-        )
-        self.reasoning_enabled = kwargs.get(
-            "reasoning_enabled", settings.openai.reasoning_enabled
-        )
-        self.allow_fallbacks = kwargs.get(
-            "allow_fallbacks", settings.openai.allow_fallbacks
-        )
-
     def generate_response(
-        self, message_history: list[MessageHistory]
+        self,
+        message_history: list[MessageHistory],
+        allowed_tools: list[str] | None = None,
     ) -> AssistantResponse:
         converted_history = self._convert_message_history(message_history)
 
-        provider_dict = {
-            "order": self.provider_order,
-            "allow_fallbacks": self.allow_fallbacks,
-        }
+        tools = (
+            [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
+            if allowed_tools
+            else OPENAI_TOOLS
+        )
 
         response = self.client.chat.completions.create(
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
-            tools=cast(list[ChatCompletionToolUnionParam], OPENAI_TOOLS),
-            # extra_body={
-            #     "provider": provider_dict,
-            #     "reasoning": {"enabled": self.reasoning_enabled},
-            # },
+            tools=cast(list[ChatCompletionToolUnionParam], tools),
         )
 
         return self.assistant_response_converter.from_dict(data=response.model_dump())

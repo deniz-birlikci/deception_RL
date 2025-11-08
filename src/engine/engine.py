@@ -1,97 +1,289 @@
 import random
-import time
 import uuid
+from queue import Queue
+from typing import cast
+
 from src.models import (
     Agent,
     AgentRole,
     AIModel,
     PolicyCard,
+    Backend,
     PresidentPickChancellorEventPublic,
     VoteChancellorYesNoEventPublic,
-    ChooseAgentToVoteOutEventPublic,
     AskAgentIfWantsToSpeakEventPublic,
     AgentResponseToQuestioningEventPublic,
     PresidentChooseCardToDiscardEventPrivate,
     ChancellorReceivePoliciesEventPrivate,
     ChancellorPlayPolicyEventPublic,
-    UserInput,
     PresidentPickChancellorTool,
     VoteChancellorYesNoTool,
     PresidentChooseCardToDiscardTool,
     ChancellorPlayPolicyTool,
     AskAgentIfWantsToSpeakTool,
     AgentResponseToQuestionTool,
+    UserInput,
+    ToolFeedback,
+    ToolResult,
 )
+from src.agent import BaseAgent
 from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
-from src.env import settings
+from src.engine.external_agent_response_parser import ExternalAgentResponseParser
+from src.models import Tools
+
+ROLES = [
+    AgentRole.HITLER,
+    AgentRole.FASCIST,
+    AgentRole.LIBERAL,
+    AgentRole.LIBERAL,
+    AgentRole.LIBERAL,
+]
 
 
 class Engine:
     def __init__(
         self,
         deck: Deck,
+        ai_models: list[AIModel | None],
         fascist_policies_to_win: int = 6,
         liberal_policies_to_win: int = 5,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
-        self.hitler_election_threshold = fascist_policies_to_win // 2
 
-        self.agents_by_id: dict[str, Agent] = {}
-        self.president_rotation: list[str] = []
-        self.current_president_id: str | None = None
-        self.current_chancellor_id: str | None = None
+        shuffled_roles = random.sample(ROLES, len(ROLES))
+        agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
+        agents = [
+            Agent(agent_id=aid, role=role, ai_model=model)
+            for aid, role, model in zip(agent_ids, shuffled_roles, ai_models)
+        ]
+
+        self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
+        self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
+        self.current_president_idx: int = 0
         self.fascist_policies_played: int = 0
         self.liberal_policies_played: int = 0
+        self.public_events: list = []
+        self.private_events_by_agent: dict[str, list] = {aid: [] for aid in agent_ids}
 
-        self.public_events: list[
-            PresidentPickChancellorEventPublic
-            | VoteChancellorYesNoEventPublic
-            | ChooseAgentToVoteOutEventPublic
-            | AskAgentIfWantsToSpeakEventPublic
-            | AgentResponseToQuestioningEventPublic
-            | ChancellorPlayPolicyEventPublic
-        ] = []
+        self.ai_agents: dict[str, BaseAgent] = {}
+        self.msg_history: dict[str, list] = {aid: [] for aid in agent_ids}
+        for aid, agent in self.agents_by_id.items():
+            if agent.ai_model:
+                self.ai_agents[aid] = AgentRegistry.create_agent(
+                    backend=Backend.OPENAI, ai_model=agent.ai_model
+                )
 
-        self.private_events_by_agent: dict[
-            str,
-            list[
-                PresidentChooseCardToDiscardEventPrivate
-                | ChancellorReceivePoliciesEventPrivate
-            ],
-        ] = {}
+    def run(self, input_queue: Queue, output_queue: Queue) -> None:
+        while not self._is_game_over():
+            president_id = self.president_rotation[self.current_president_idx]
 
-    def create(
+            tool = cast(
+                PresidentPickChancellorTool,
+                self._get_tool(
+                    president_id,
+                    "Nominate a Chancellor.",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["president-pick-chancellor"],
+                ),
+            )
+            chancellor_id = tool.agent_id
+            self.public_events.append(
+                PresidentPickChancellorEventPublic(
+                    president_id=president_id, chancellor_id=chancellor_id
+                )
+            )
+
+            self._discourse(input_queue, output_queue)
+
+            if not self._vote(chancellor_id, input_queue, output_queue):
+                self.current_president_idx = (self.current_president_idx + 1) % len(
+                    self.president_rotation
+                )
+                continue
+
+            cards = self.deck.draw(3)
+            tool = cast(
+                PresidentChooseCardToDiscardTool,
+                self._get_tool(
+                    president_id,
+                    f"Cards: {cards}. Discard index (0-2).",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["president-choose-card-to-discard"],
+                ),
+            )
+            idx = tool.card_index
+            discarded = cards.pop(idx)
+            self.private_events_by_agent[president_id].append(
+                PresidentChooseCardToDiscardEventPrivate(
+                    president_id=president_id,
+                    cards_drawn=cards + [discarded],
+                    card_discarded=discarded,
+                )
+            )
+
+            tool = cast(
+                ChancellorPlayPolicyTool,
+                self._get_tool(
+                    chancellor_id,
+                    f"Cards: {cards}. Play index (0-1).",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["chancellor-play-policy"],
+                ),
+            )
+            idx = tool.card_index
+            played = cards[idx]
+            self.private_events_by_agent[chancellor_id].append(
+                ChancellorReceivePoliciesEventPrivate(
+                    chancellor_id=chancellor_id,
+                    president_id_received_from=president_id,
+                    cards_received=cards,
+                    card_discarded=cards[1 - idx],
+                )
+            )
+            self.public_events.append(
+                ChancellorPlayPolicyEventPublic(
+                    chancellor_id=chancellor_id, card_played=played
+                )
+            )
+
+            if played == PolicyCard.FASCIST:
+                self.fascist_policies_played += 1
+            else:
+                self.liberal_policies_played += 1
+
+            self._discourse(input_queue, output_queue)
+            self.current_president_idx = (self.current_president_idx + 1) % len(
+                self.president_rotation
+            )
+
+        output_queue.put(
+            "Game Over: Fascists win!"
+            if self.fascist_policies_played >= self.fascist_policies_to_win
+            else "Game Over: Liberals win!"
+        )
+
+    def _get_tool(
         self,
-        ai_models: list[AIModel | None],
-    ) -> None:
-        roles = [
-            AgentRole.HITLER,
-            AgentRole.FASCIST,
-            AgentRole.LIBERAL,
-            AgentRole.LIBERAL,
-            AgentRole.LIBERAL,
-        ]
+        agent_id: str,
+        prompt: str,
+        input_queue: Queue,
+        output_queue: Queue,
+        allowed_tools: list[str] | None = None,
+    ) -> Tools:
+        agent = self.agents_by_id[agent_id]
+        full_prompt = f"Agent {agent_id}, Role: {agent.role}\n{prompt}"
 
-        shuffled_roles = random.sample(roles, len(roles))
+        if agent.ai_model is None:
+            output_queue.put(full_prompt)
+            return ExternalAgentResponseParser.parse(
+                input_queue.get()
+            ).hydrated_tool_calls[0]
 
-        agent_ids = [str(uuid.uuid4()) for _ in range(len(ai_models))]
+        user_input = UserInput(
+            history_type="user-input",
+            user_message=full_prompt,
+            timestamp=str(uuid.uuid4()),
+        )
+        self.msg_history[agent_id].append(user_input)
 
-        agents = [
-            Agent(agent_id=agent_id, role=role, ai_model=ai_model)
-            for agent_id, role, ai_model in zip(agent_ids, shuffled_roles, ai_models)
-        ]
+        response = self.ai_agents[agent_id].generate_response(
+            self.msg_history[agent_id], allowed_tools=allowed_tools
+        )
+        self.msg_history[agent_id].append(response)
 
-        self.agents_by_id = {agent.agent_id: agent for agent in agents}
+        feedback = ToolFeedback(
+            history_type="tool-feedback",
+            tool_call_results=[
+                ToolResult(
+                    tool_call_id=response.tool_calls[0].tool_call_id,
+                    tool_name=response.tool_calls[0].tool_name,
+                    output="OK",
+                )
+            ],
+            timestamp=str(uuid.uuid4()),
+        )
+        self.msg_history[agent_id].append(feedback)
 
-        for agent_id in agent_ids:
-            self.private_events_by_agent[agent_id] = []
+        return response.hydrated_tool_calls[0]
 
-        self.president_rotation = random.sample(agent_ids, len(agent_ids))
+    def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
+        speakers = []
+        for aid in self.agents_by_id:
+            tool = cast(
+                AskAgentIfWantsToSpeakTool,
+                self._get_tool(
+                    aid,
+                    "Speak? (question/statement or null)",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["ask-agent-if-wants-to-speak"],
+                ),
+            )
+            if tool.question_or_statement:
+                speakers.append((aid, tool))
 
-        self.current_president_id = random.choice(agent_ids)
-        self.current_chancellor_id = None
+        random.shuffle(speakers)
 
-    
+        for aid, tool in speakers:
+            self.public_events.append(
+                AskAgentIfWantsToSpeakEventPublic(
+                    agent_id=aid,
+                    question_or_statement=tool.question_or_statement,
+                    ask_directed_question_to_agent_id=tool.ask_directed_question_to_agent_id,
+                )
+            )
+
+            if tool.ask_directed_question_to_agent_id:
+                target = tool.ask_directed_question_to_agent_id
+                resp = cast(
+                    AgentResponseToQuestionTool,
+                    self._get_tool(
+                        target,
+                        f"Asked: {tool.question_or_statement}. Respond.",
+                        input_queue,
+                        output_queue,
+                        allowed_tools=["agent-response-to-question-tool"],
+                    ),
+                )
+                self.public_events.append(
+                    AgentResponseToQuestioningEventPublic(
+                        agent_id=target,
+                        in_response_to_agent_id=aid,
+                        response=resp.response,
+                    )
+                )
+
+    def _vote(
+        self, chancellor_id: str, input_queue: Queue, output_queue: Queue
+    ) -> bool:
+        votes = []
+        for aid in self.agents_by_id:
+            tool = cast(
+                VoteChancellorYesNoTool,
+                self._get_tool(
+                    aid,
+                    f"Vote on Chancellor {chancellor_id}? (true/false)",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["vote-chancellor-yes-no"],
+                ),
+            )
+            votes.append(tool.choice)
+            self.public_events.append(
+                VoteChancellorYesNoEventPublic(
+                    voter_id=aid, chancellor_nominee_id=chancellor_id, vote=tool.choice
+                )
+            )
+        return sum(votes) > len(votes) // 2
+
+    def _is_game_over(self) -> bool:
+        return (
+            self.fascist_policies_played >= self.fascist_policies_to_win
+            or self.liberal_policies_played >= self.liberal_policies_to_win
+        )
