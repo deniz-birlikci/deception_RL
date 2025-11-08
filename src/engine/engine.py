@@ -136,6 +136,7 @@ class Engine:
             )
             idx = tool.card_index
             discarded = cards.pop(idx)
+            self.deck.add_to_discard(discarded)
 
             self.private_events_by_agent[president_id].append(
                 PresidentChooseCardToDiscardEventPrivate(
@@ -158,12 +159,15 @@ class Engine:
             )
             idx = tool.card_index
             played = cards[idx]
+            discarded_by_chancellor = cards[1 - idx]
+            self.deck.add_to_discard(discarded_by_chancellor)
+            
             self.private_events_by_agent[chancellor_id].append(
                 ChancellorReceivePoliciesEventPrivate(
                     chancellor_id=chancellor_id,
                     president_id_received_from=president_id,
                     cards_received=cards,
-                    card_discarded=cards[1 - idx],
+                    card_discarded=discarded_by_chancellor,
                 )
             )
             self.public_events.append(

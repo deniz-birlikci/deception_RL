@@ -6,6 +6,7 @@ class Deck:
     def __init__(self, multiplier: int = 1) -> None:
         self.multiplier = multiplier
         self.cards: list[PolicyCard] = []
+        self.discard_pile: list[PolicyCard] = []
         self._initialize_deck()
 
     def draw(self, count: int = 1) -> list[PolicyCard]:
@@ -13,7 +14,7 @@ class Deck:
 
         for _ in range(count):
             if len(self.cards) == 0:
-                self._initialize_deck()
+                self._reshuffle_discard()
 
             drawn_cards.append(self.cards.pop())
 
@@ -21,6 +22,17 @@ class Deck:
 
     def cards_remaining(self) -> int:
         return len(self.cards)
+
+    def add_to_discard(self, card: PolicyCard) -> None:
+        self.discard_pile.append(card)
+
+    def _reshuffle_discard(self) -> None:
+        if len(self.discard_pile) == 0:
+            raise ValueError("Cannot reshuffle: both draw pile and discard pile are empty")
+        
+        self.cards = self.discard_pile
+        self.discard_pile = []
+        random.shuffle(self.cards)
 
     def _initialize_deck(self) -> None:
         fascist_count = 11 * self.multiplier
