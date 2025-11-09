@@ -7,13 +7,19 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 .header-spacer { width: 100px; }
 .players-info { display: flex; gap: 16px; font-size: 13px; flex-wrap: wrap; justify-content: center; flex: 1; }
 .player-card { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 60px; }
-.player-card.you-player { border: 2px solid #3b82f6; border-radius: 8px; padding: 6px; background: rgba(59, 130, 246, 0.1); }
+.player-card.you-player { border: 2px solid #3b82f6; border-radius: 8px; padding: 4px 6px; background: rgba(59, 130, 246, 0.1); margin: -6px -8px; }
 .player-name { font-weight: 600; color: #e5e7eb; }
 .player-role { font-size: 11px; opacity: 0.85; font-weight: 500; }
 .player-role.liberal { color: #34d399; }
 .player-role.fascist { color: #f87171; }
-.player-role.hitler { color: #f87171; font-weight: 600; }
-.player-title { font-size: 10px; color: #9ca3af; font-weight: 600; }
+.player-role.hitler { color: #f87171; }
+.player-title { font-size: 10px; color: #2563eb; font-weight: 600; }
+
+/* Eliminated player styling */
+.player-card.eliminated .player-name { color: #374151; opacity: 0.6; }
+.player-card.eliminated .player-role { color: #374151 !important; opacity: 0.5; }
+.player-card.eliminated .player-title { color: #374151; opacity: 0.5; }
+.player-card.eliminated { opacity: 0.7; }
 
 .game-button { 
   background: #93c5fd; 
@@ -36,7 +42,7 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
   transform: none;
 }
 
-.layout { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; padding: 16px; height: calc(100vh - 60px); overflow: hidden; }
+.layout { display: grid; grid-template-columns: 1.5fr 0.8fr; gap: 16px; padding: 16px; height: calc(100vh - 60px); overflow: hidden; }
 
 .left-pane, .right-pane { display: flex; flex-direction: column; gap: 16px; min-height: 0; height: 100%; }
 
@@ -49,12 +55,13 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 .message-container .chat-meta { font-size: 11px; color: #9ca3af; margin-bottom: 4px; }
 .chat-meta.liberal { color: #34d399; }
 .chat-meta.fascist { color: #f87171; }
-.chat-meta.hitler { color: #f87171; font-weight: 600; }
+.chat-meta.hitler { color: #f87171; }
+.chat-meta.eliminated { color: #374151 !important; opacity: 0.6; }
 
 .chat-item { max-width: 80%; padding: 10px 12px; border-radius: 14px; line-height: 1.3; color: #e5e7eb; }
 .chat-item.speaker { background: #2563eb; align-self: flex-start; border-bottom-left-radius: 4px; }
 .chat-item.answer { background: #374151; align-self: flex-end; border-bottom-right-radius: 4px; }
-.chat-item.you { background: transparent; border: 2px dashed #4b5563; align-self: flex-start; border-bottom-left-radius: 4px; color: #9ca3af; }
+.chat-item.you { background: #1f2937; align-self: flex-start; border-bottom-left-radius: 4px; color: #e5e7eb; }
 .chat-item.event { background: #0e223f; align-self: flex-end; border-bottom-right-radius: 4px; border: 1px solid #1f3a5b; color: #dbeafe; }
 
 .message-container:has(.chat-item.speaker) .chat-meta,
@@ -63,12 +70,12 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 .message-container:has(.chat-item.event) .chat-meta { align-self: flex-end; }
 
 .boards-panel { flex: 1; overflow: hidden; }
-.boards { display: grid; grid-template-rows: 1fr auto; align-content: start;
+.boards { display: grid; grid-template-rows: 1fr 1fr; align-content: start;
  gap: 16px; padding: 12px; height: 100%; overflow: hidden; }
 .board { background: #0c1528; border: 1px solid #1f2937; border-radius: 10px; padding: 12px; overflow: hidden; }
-.board-title { color: #e5e7eb; font-weight: 600; margin-bottom: 16px; letter-spacing: 1px; }
+.board-title { color: #e5e7eb; font-weight: 600; margin-bottom: 12px; letter-spacing: 0.5px; font-size: 13px; text-transform: uppercase; }
 
-.combined-tracks { display: flex; flex-direction: column; gap: 16px; padding: 20px; justify-content: flex-start; align-items: stretch; }
+.combined-tracks { display: flex; flex-direction: column; gap: 32px; padding: 24px; justify-content: center; align-items: stretch; height: 100%; }
 .track-section { width: 100%; }
 .track-section:nth-child(2) .board-title { margin-top: 8px; margin-bottom: 8px; }
 .track-section:last-child { margin-bottom: 0; }
@@ -79,47 +86,69 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
   display: flex;
   align-items: center;
   justify-content: center;
+  height: 100%;
 }
 
 .card-selection-container {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  padding: 16px;
   width: 100%;
-  max-width: 500px;
+  height: 100%;
+  justify-content: center;
 }
 
 .president-selection, .chancellor-selection {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
+  flex: 1;                
+  justify-content: center;
 }
 
 .selection-title {
-  color: #e5e7eb;
-  font-weight: 600;
-  font-size: 14px;
+  color: #9ca3af;
+  font-weight: 500;
+  font-size: 12px;
   text-align: center;
+  margin-bottom: 8px;
 }
 
 .card-row {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   justify-content: center;
   flex-wrap: wrap;
+  min-height: 0; /* Ensure space for cards */
+  padding: 0;
+}
+
+.card-placeholder {
+  width: 75px;
+  height: 105px;
+  border-radius: 6px;
+  border: 2px dashed #374151;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6b7280;
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 .policy-card {
-  width: 60px;
-  height: 84px;
+  width: 75px;
+  height: 105px;
   border-radius: 6px;
   border: 2px solid #374151;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
   position: relative;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
 }
 
 .policy-card.liberal {
@@ -131,8 +160,8 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 }
 
 .policy-card.discarded {
-  opacity: 0.4;
-  transform: scale(0.9);
+  opacity: 0.35;
+  filter: grayscale(60%);
 }
 
 .policy-card.played {
@@ -140,8 +169,8 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
   box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.3);
 }
 
-.track { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
-.track .slot { aspect-ratio: 5 / 7; border-radius: 6px; border: 2px dashed #1f2937; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 10px; background-size: cover; background-position: center; background-repeat: no-repeat; }
+.track { display: grid; gap: 8px; grid-auto-flow: column; grid-auto-columns: 65px; justify-content: flex-start; }
+.track .slot { width: 65px; height: 91px; border-radius: 6px; border: 2px dashed #1f2937; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 10px; background-size: cover; background-position: center; background-repeat: no-repeat; }
 .track .slot.filled { border-style: solid; border-color: #374151; }
 .track.liberal .slot.filled { background-image: url('./media/liberal-card.png'); }
 .track.fascist .slot.filled { background-image: url('./media/facist-card.png'); }

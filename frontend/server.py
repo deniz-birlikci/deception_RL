@@ -3,10 +3,11 @@ from __future__ import annotations
 import os
 import sys
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any, Dict
+import asyncio
 
 # Make sure project root is importable when running from frontend/
 PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -35,6 +36,8 @@ class GameState(BaseModel):
 # In-memory state
 _engine: Engine | None = None
 _game_id: str | None = None
+_game_running: bool = False
+_game_task: asyncio.Task | None = None
 
 
 def _serialize_event(ev: Any) -> Dict[str, Any]:
@@ -60,21 +63,32 @@ def _serialize_event(ev: Any) -> Dict[str, Any]:
 @app.post("/api/create", response_model=GameState)
 def api_create_game() -> GameState:
     global _engine, _game_id
-    deck = Deck()
-    _engine = Engine(deck=deck)
-    # default five slots of models (can be None)
-    ai_models = [
-        AIModel.OPENAI_GPT_5,
-        AIModel.OPENAI_GPT_5_MINI,
-        AIModel.OPENAI_GPT_5_NANO,
-        AIModel.OPENAI_GPT_4_1,
-        None,
-    ]
-    _engine.create(ai_models=ai_models)
+    try:
+        deck = Deck()
+        # default five slots of models (can be None)
+        ai_models = [
+            AIModel.OPENAI_GPT_5,
+            AIModel.OPENAI_GPT_5_MINI,
+            AIModel.OPENAI_GPT_5_NANO,
+            AIModel.OPENAI_GPT_4_1,
+            None,
+        ]
+        print(f"Creating engine with ai_models: {ai_models}")
+        _engine = Engine(
+            deck=deck,
+            ai_models=ai_models,
+            fascist_policies_to_win=6,
+            liberal_policies_to_win=5
+        )
+        print("Engine created successfully")
+    except Exception as e:
+        print(f"Error creating engine: {e}")
+        raise
     
     # For demo purposes, assign a random Chancellor so we can see both titles
     agent_ids = list(_engine.agents_by_id.keys())
-    available_for_chancellor = [aid for aid in agent_ids if aid != _engine.current_president_id]
+    current_president_id = _engine.president_rotation[_engine.current_president_idx]
+    available_for_chancellor = [aid for aid in agent_ids if aid != current_president_id]
     if available_for_chancellor:
         _engine.current_chancellor_id = available_for_chancellor[0]
     
@@ -82,12 +96,54 @@ def api_create_game() -> GameState:
     return GameState(game_id=_game_id)
 
 
-@app.post("/api/{game_id}/discussion")
-def api_run_discussion(game_id: str) -> Dict[str, Any]:
+@app.post("/api/{game_id}/start")
+async def api_start_game(game_id: str, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    global _game_running, _game_task
+    
     if _engine is None or _game_id != game_id:
         return {"ok": False, "error": "game not found"}
-    _engine.run_discussion_round()
-    return {"ok": True}
+    
+    if _game_running:
+        return {"ok": False, "error": "game already running"}
+    
+    # Create queues for async communication
+    input_queue = asyncio.Queue()
+    output_queue = asyncio.Queue()
+    
+    async def run_game_background():
+        global _game_running
+        try:
+            print(f"Starting game {game_id} in background...")
+            _game_running = True
+            await _engine.run(input_queue, output_queue)
+            print(f"Game {game_id} completed!")
+        except Exception as e:
+            print(f"Error running game: {e}")
+        finally:
+            _game_running = False
+    
+    # Start the game in the background
+    _game_task = asyncio.create_task(run_game_background())
+    
+    return {"ok": True, "message": "Game started in background"}
+
+
+@app.post("/api/{game_id}/discussion")
+async def api_run_discussion(game_id: str) -> Dict[str, Any]:
+    if _engine is None or _game_id != game_id:
+        return {"ok": False, "error": "game not found"}
+    
+    # Create queues for async communication
+    input_queue = asyncio.Queue()
+    output_queue = asyncio.Queue()
+    
+    try:
+        # Run a single discourse round
+        await _engine._discourse(input_queue, output_queue)
+        return {"ok": True}
+    except Exception as e:
+        print(f"Error running discussion: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/{game_id}/state")
@@ -105,7 +161,8 @@ def api_state(game_id: str) -> Dict[str, Any]:
     players = []
     
     for i, (agent_id, agent) in enumerate(_engine.agents_by_id.items()):
-        is_president = agent_id == _engine.current_president_id
+        current_president_id = _engine.president_rotation[_engine.current_president_idx]
+        is_president = agent_id == current_president_id
         is_chancellor = agent_id == _engine.current_chancellor_id
         
         title_parts = []
@@ -132,7 +189,8 @@ def api_state(game_id: str) -> Dict[str, Any]:
             "name": player_name,
             "role": role_label,
             "title": title,
-            "is_you": is_you
+            "is_you": is_you,
+            "model": agent.ai_model
         })
     
     return {
