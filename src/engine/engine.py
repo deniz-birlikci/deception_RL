@@ -307,10 +307,11 @@ class Engine:
             history_type="tool-feedback",
             tool_call_results=[
                 ToolResult(
-                    tool_call_id=response.tool_calls[0].tool_call_id,
-                    tool_name=response.tool_calls[0].tool_name,
+                    tool_call_id=tool_call.tool_call_id,
+                    tool_name=tool_call.tool_name,
                     output="OK",
                 )
+                for tool_call in response.tool_calls  # Create response for ALL tool calls
             ],
             timestamp=str(uuid.uuid4()),
         )
