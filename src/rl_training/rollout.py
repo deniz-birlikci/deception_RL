@@ -1,5 +1,7 @@
 import json
+import time
 import uuid
+from typing import Any, Callable
 
 import openai
 import requests
@@ -16,6 +18,7 @@ from src.engine.deck import Deck
 from src.models import AIModel
 import art
 from art.types import Messages
+from openai.types.chat.chat_completion import Choice
 
 load_dotenv()
 
@@ -23,13 +26,12 @@ load_dotenv()
 MAX_RETRIES = 3
 MAX_TURNS = 100  # Prevent infinite games
 
-# Default training completition models
-DEFAULT_TRAINING_MODEL_SETUP = [
-    AIModel.OPENAI_GPT_5,
+# Default opponent models for training
+DEFAULT_OPPONENT_MODELS = [
     AIModel.OPENAI_GPT_5_MINI,
-    AIModel.OPENAI_GPT_5_NANO,
-    AIModel.OPENAI_GPT_4_1,
-    None,
+    AIModel.OPENAI_GPT_5_MINI,
+    AIModel.OPENAI_GPT_5_MINI,
+    AIModel.OPENAI_GPT_5_MINI,
 ]
 
 # Global engine API instance
@@ -123,6 +125,48 @@ def extract_tool_call_from_choice(choice) -> tuple[str, dict] | None:
     return tool_name, arguments
 
 
+def _serialize_messages_and_choices(
+    messages_and_choices: list[Any],
+) -> list[Any]:
+    serialized: list[Any] = []
+    for item in messages_and_choices:
+        if isinstance(item, dict):
+            serialized.append(item)
+            continue
+
+        # Try common serialization hooks before falling back to repr
+        model_dump = getattr(item, "model_dump", None)
+        if callable(model_dump):
+            try:
+                serialized.append(model_dump())
+                continue
+            except Exception:
+                pass
+
+        model_dump_json = getattr(item, "model_dump_json", None)
+        if callable(model_dump_json):
+            try:
+                serialized.append(json.loads(model_dump_json()))
+                continue
+            except Exception:
+                pass
+
+        serialized.append({"repr": repr(item)})
+    return serialized
+
+
+@weave.op(tracing_sample_rate=1.0)
+def log_final_trajectory_state(
+    game_id: str, messages_and_choices: list[Any], reward: float
+) -> dict[str, Any]:
+    return {
+        "game_id": game_id,
+        "reward": reward,
+        "messages_and_choices": _serialize_messages_and_choices(messages_and_choices),
+    }
+
+
+@weave.op(tracing_sample_rate=1.0)
 async def get_completion_with_retries(
     model: art.Model,
     messages: Messages,
@@ -164,7 +208,6 @@ async def get_completion_with_retries(
         try:
             type_shit = str(uuid.uuid4())
             # Get LLM response with tool calling
-            print(f"[uuid={type_shit}] messages={messages}")
             async with trajectory.track_duration("llm_completion"):
                 chat_completion = await get_completion_with_tools(
                     model=model,
@@ -174,10 +217,7 @@ async def get_completion_with_retries(
                     enable_thinking=enable_thinking,
                 )
 
-            print(f"[uuid={type_shit}] chat_completion={chat_completion}")
-
             choice = chat_completion.choices[0]
-            print(f"[uuid={type_shit}] choice={choice}")
 
             trajectory.messages_and_choices.append(choice)
 
@@ -233,7 +273,164 @@ def format_tool_response_for_game_engine(tool_name: str, arguments: dict) -> str
     return json.dumps({"tool_name": tool_name, "arguments": arguments})
 
 
-@weave.op
+def get_policy_role(engine_api: EngineAPI, game_id: str) -> str | None:
+    """
+    Get the role assigned to the policy being trained.
+    
+    Returns:
+        Role name ("liberal", "fascist", or "hitler"), or None if not found
+    """
+    engine = engine_api.engines.get(game_id)
+    if not engine:
+        return None
+    
+    # Get the policy agent
+    policy_agent = engine.agents_by_id.get(engine.policy_agent_id)
+    if not policy_agent:
+        return None
+    
+    return policy_agent.role.value
+
+
+def _analyze_discard_behavior(trajectory: art.Trajectory, policy_role: str | None) -> None:
+    """
+    Analyze the policy agent's discard behavior during the game.
+    
+    Tracks when the policy agent discards their own team's cards when they have
+    both liberal and fascist cards available (strategic discard).
+    
+    Args:
+        trajectory: The completed trajectory
+        policy_role: The role assigned to the policy agent (liberal/fascist/hitler)
+    """
+    if policy_role is None:
+        return
+    
+    # Determine which card type is "own" for this role
+    # Liberal discards liberal = own card
+    # Fascist/Hitler discards fascist = own card
+    own_card_type = "liberal" if policy_role == "liberal" else "fascist"
+    
+    messages_and_choices = trajectory.messages_and_choices
+    
+    # Iterate through messages to find discard prompts
+    i = 0
+    while i < len(messages_and_choices):
+        item = messages_and_choices[i]
+        
+        # Look for user messages with discard prompts
+        if isinstance(item, dict) and item.get("role") == "user":
+            content = item.get("content", "")
+            
+            # Check for president discard prompt
+            if "Cards:" in content and "Discard index (0-2)" in content:
+                cards, discard_idx = _parse_discard_action(messages_and_choices, i)
+                if cards is not None and discard_idx is not None and len(cards) == 3:
+                    trajectory.metrics["discard_as_president_count"] += 1
+                    # Check if both card types are available
+                    if "liberal" in cards and "fascist" in cards:
+                        discarded_card = cards[discard_idx]
+                        if discarded_card == own_card_type:
+                            trajectory.metrics["discard_as_president_own_card_count"] += 1
+            
+            # Check for chancellor discard prompt
+            elif "Cards:" in content and "Play index (0-1)" in content:
+                cards, play_idx = _parse_discard_action(messages_and_choices, i)
+                if cards is not None and play_idx is not None and len(cards) == 2:
+                    trajectory.metrics["discard_as_chancellor_count"] += 1
+                    # Check if both card types are available
+                    if "liberal" in cards and "fascist" in cards:
+                        # Chancellor discards the card they DON'T play
+                        discard_idx = 1 - play_idx
+                        discarded_card = cards[discard_idx]
+                        if discarded_card == own_card_type:
+                            trajectory.metrics["discard_as_chancellor_own_card_count"] += 1
+        
+        i += 1
+
+
+def _parse_discard_action(
+    messages_and_choices: list, user_msg_idx: int
+) -> tuple[list[str] | None, int | None]:
+    """
+    Parse cards and discard/play choice from a discard prompt.
+    
+    Args:
+        messages_and_choices: List of messages and choices
+        user_msg_idx: Index of the user message with the discard prompt
+    
+    Returns:
+        Tuple of (cards_list, chosen_index) or (None, None) if parsing fails
+    """
+    import re
+    
+    user_msg = messages_and_choices[user_msg_idx]
+    content = user_msg.get("content", "")
+    
+    # Extract cards from the prompt
+    # Format: "Cards: [PolicyCard.LIBERAL, PolicyCard.FASCIST, ...]"
+    cards_match = re.search(r"Cards: \[(.*?)\]", content)
+    if not cards_match:
+        return None, None
+    
+    cards_str = cards_match.group(1)
+    # Parse card types - extract just "liberal" or "fascist"
+    cards = []
+    for card in cards_str.split(","):
+        if "LIBERAL" in card.upper():
+            cards.append("liberal")
+        elif "FASCIST" in card.upper():
+            cards.append("fascist")
+    
+    if not cards:
+        return None, None
+    
+    # Find the next assistant message with tool call
+    for j in range(user_msg_idx + 1, len(messages_and_choices)):
+        item = messages_and_choices[j]
+        
+        # Check if it's a Choice object with tool calls
+        if isinstance(item, Choice):
+            if item.message.tool_calls:
+                tool_call = item.message.tool_calls[0]
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                    # Look for card_index in the arguments
+                    if "card_index" in args:
+                        return cards, args["card_index"]
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        
+        # Stop if we hit another user message (moved to next turn)
+        if isinstance(item, dict) and item.get("role") == "user":
+            break
+    
+    return None, None
+
+
+def get_messages_from_trajectory(
+    messages_and_choices: art.types.MessagesAndChoices,
+) -> Messages:
+    messages: Messages = []
+    for item in messages_and_choices:
+        # If it's a Choice, it has to be a tool call, so we format it
+        if isinstance(item, Choice):
+            # Use attribute access for Pydantic models
+            if item.message.tool_calls:
+                # Convert tool_calls to dicts (they're Pydantic models too)
+                msg = {
+                    "role": "assistant", 
+                    "content": item.message.content or "", 
+                    "tool_calls": [tc.model_dump() for tc in item.message.tool_calls]
+                }
+                messages.append(msg)
+        elif isinstance(item, dict):
+            messages.append(item)
+        else:
+            raise ValueError(f"Unsupported message type: {type(item)}")
+    return messages
+
+
 @art.retry(
     exceptions=(openai.LengthFinishReasonError, requests.ReadTimeout, EngineException)
 )
@@ -263,13 +460,25 @@ async def rollout(
     Returns:
         Trajectory containing the game history and reward
     """
+    # Start timing the entire rollout
+    rollout_start_time = time.perf_counter()
+    
     # Initialize the game
     game_id = str(uuid.uuid4())
+    policy_ai_model = AIModel.QWEN_POLICY_AGENT
+
+    # Time the engine create call
+    create_start = time.perf_counter()
     model_input = await _engine_api.create(
         game_id=game_id,
         deck=Deck(),
-        ai_models=DEFAULT_TRAINING_MODEL_SETUP,
+        opponent_models=DEFAULT_OPPONENT_MODELS,
+        policy_model=policy_ai_model,
     )
+    create_time_ms = (time.perf_counter() - create_start) * 1000
+
+    # Get the role assigned to our policy
+    policy_role = get_policy_role(_engine_api, game_id)
 
     trajectory = art.Trajectory(
         messages_and_choices=[],
@@ -277,12 +486,21 @@ async def rollout(
             "step": step,
             "validation": is_validation,
             "game_id": game_id,
+            "policy_role": policy_role,  # Track which role our policy is playing
         },
         reward=0,
         metrics={
             "num_turns": 0,
             "invalid_tool_calls": 0,
             "total_retries": 0,
+            "engine_create_time_ms": create_time_ms,
+            "engine_execute_time_ms": 0,
+            "total_engine_time_ms": create_time_ms,
+            # Discard tracking for policy agent only
+            "discard_as_president_count": 0,
+            "discard_as_president_own_card_count": 0,
+            "discard_as_chancellor_count": 0,
+            "discard_as_chancellor_own_card_count": 0,
         },
         # tools=TOOLS,  # Store tool schemas in trajectory
     )
@@ -290,6 +508,7 @@ async def rollout(
     num_turns = 0
     game_over = False
     messages_added_count = 0  # Track how many messages we've already added
+    final_state_logged = False
 
     if verbose:
         print(f"\n{'=' * 60}")
@@ -323,7 +542,8 @@ async def rollout(
                 # Skip assistant messages - we already added them as Choice objects
                 continue
             cleaned = clean_msg(msg)
-            print(f"[uuid={game_id}] cleaned={cleaned}")
+            if verbose:
+                print(f"[uuid={game_id}] cleaned={cleaned}")
             trajectory.messages_and_choices.append(cleaned)
         
         # Update count to track what we've added
@@ -333,15 +553,26 @@ async def rollout(
         if model_input.terminal_state is not None:
             game_over = True
             terminal_state: TerminalState = model_input.terminal_state
+            
             trajectory.reward = terminal_state.reward
+            trajectory.metrics["final_reward"] = terminal_state.reward  # Log reward in metrics
             # Validate game_id matches (sanity check)
             assert terminal_state.game_id == game_id, (
                 f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
             )
 
+            with weave.thread(thread_id=game_id):
+                log_final_trajectory_state(
+                    game_id=game_id,
+                    messages_and_choices=trajectory.messages_and_choices,
+                    reward=trajectory.reward,
+                )
+            final_state_logged = True
+
             if verbose:
                 print(f"\n{'=' * 60}")
                 print(f"Game Over! Reward: {terminal_state.reward}")
+                print(f"Role: {policy_role}")
                 print(f"{'=' * 60}\n")
             break
 
@@ -354,25 +585,32 @@ async def rollout(
 
         # Get valid tool call from model (with retries)
         try:
-            tool_name, arguments, num_retries = await get_completion_with_retries(
-                model=model,
-                messages=model_input.messages,
-                tool_target=model_input.tool_call,
-                trajectory=trajectory,
-                enable_thinking=enable_thinking,
-                verbose=verbose,
-            )
+            with weave.thread(thread_id=game_id):
+                tool_name, arguments, num_retries = await get_completion_with_retries(
+                    model=model,
+                    messages=get_messages_from_trajectory(trajectory.messages_and_choices),
+                    tool_target=model_input.tool_call,
+                    trajectory=trajectory,
+                    enable_thinking=enable_thinking,
+                    verbose=verbose,
+                )
 
             # Track retry metrics
             trajectory.metrics["total_retries"] += num_retries
 
-            # Format for engine and execute
+            # Format for engine and execute (with timing)
             model_function_calling_json = format_tool_response_for_game_engine(
                 tool_name, arguments
             )
+            execute_start = time.perf_counter()
             model_input = await _engine_api.execute(
                 game_id, ModelOutput(function_calling_json=model_function_calling_json)
             )
+            execute_time_ms = (time.perf_counter() - execute_start) * 1000
+
+            # Track engine timing metrics
+            trajectory.metrics["engine_execute_time_ms"] += execute_time_ms
+            trajectory.metrics["total_engine_time_ms"] += execute_time_ms
 
         except (openai.LengthFinishReasonError, EngineException):
             # Fatal errors - propagate up to @art.retry decorator
@@ -408,9 +646,25 @@ async def rollout(
 
     if verbose:
         print("\nFinal Trajectory Stats:")
+        print(f"  Role: {policy_role}")
         print(f"  Turns: {num_turns}")
         print(f"  Reward: {trajectory.reward}")
         print(f"  Invalid tool calls: {trajectory.metrics['invalid_tool_calls']}")
         print(f"  Total retries: {trajectory.metrics['total_retries']}")
+
+    if not final_state_logged:
+        with weave.thread(thread_id=game_id):
+            log_final_trajectory_state(
+                game_id=game_id,
+                messages_and_choices=trajectory.messages_and_choices,
+                reward=trajectory.reward,
+            )
+
+    # Calculate rollout duration
+    rollout_duration_seconds = time.perf_counter() - rollout_start_time
+    trajectory.metrics["rollout_duration_seconds"] = rollout_duration_seconds
+    
+    # Analyze discard behavior for the policy agent
+    _analyze_discard_behavior(trajectory, policy_role)
 
     return trajectory

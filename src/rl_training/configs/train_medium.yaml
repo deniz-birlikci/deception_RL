@@ -4,9 +4,9 @@
 #   modal run src/rl_training/train_modal.py --config configs/train_default.yaml
 
 model:
-  name: "ref-os30-gpt5mini-qwen2.5-7b"
+  name: "ref-oversamp300-gpt5mini-qwen2.5-14b"
   project: "secret-hitler"
-  base_model: "Qwen/Qwen2.5-7B-Instruct"
+  base_model: "OpenPipe/Qwen3-14B-Instruct"
 
 rollout:
   max_turns: 100
@@ -15,11 +15,11 @@ rollout:
   enable_thinking: true
   verbose: false
   enable_oversampling: true
-  oversampling_concurrency: 75
-  oversampling_timeout_seconds: 900 # 15 minutes
+  oversampling_concurrency: 64
+  oversampling_timeout_seconds: 900
 
 train:
-  train_steps: 40
+  train_steps: 100
   learning_rate: 1e-5
   random_seed: 42
 

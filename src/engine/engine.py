@@ -35,7 +35,7 @@ from src.engine.deck import Deck
 from src.agent.agent_registry import AgentRegistry
 from src.engine.external_agent_response_parser import ExternalAgentResponseParser
 from src.models import Tools
-from src.engine.prompts import get_base_game_rules_prompt
+from src.engine.prompts import get_base_game_rules_prompt, get_strategic_game_prompt
 from src.tools import generate_tools
 
 ROLES = [
@@ -47,11 +47,26 @@ ROLES = [
 ]
 
 
+def get_backend_for_model(ai_model: AIModel | None) -> Backend:
+    """
+    Determine the appropriate backend based on the AI model.
+    
+    Args:
+        ai_model: The AI model to check
+        
+    Returns:
+        Backend.QWEN for Qwen models, Backend.OPENAI otherwise
+    """
+    if ai_model and "qwen" in ai_model.value.lower():
+        return Backend.QWEN
+    return Backend.OPENAI
+
+
 class Engine:
     def __init__(
         self,
         deck: Deck,
-        ai_models: list[AIModel | None],
+        agents: list[Agent],
         fascist_policies_to_win: int,
         liberal_policies_to_win: int,
         game_id: str,
@@ -64,16 +79,16 @@ class Engine:
         self.game_id = game_id
         self.log_file = log_file
 
-        assert len(ai_models) == len(ROLES)
-
-        shuffled_roles = random.sample(ROLES, len(ROLES))
-        agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
-        agents = [
-            Agent(agent_id=aid, role=role, ai_model=model)
-            for aid, role, model in zip(agent_ids, shuffled_roles, ai_models)
-        ]
+        assert len(agents) == len(ROLES)
 
         self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
+        
+        # Find the policy agent
+        policy_agents = [a for a in agents if a.is_policy]
+        assert len(policy_agents) == 1, f"Expected exactly 1 policy agent, found {len(policy_agents)}"
+        self.policy_agent_id = policy_agents[0].agent_id
+        
+        agent_ids = [a.agent_id for a in agents]
         self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
         self.current_president_idx: int = 0
         self.current_chancellor_id: str | None = None
@@ -92,10 +107,9 @@ class Engine:
         system_prompt = self._build_system_prompt()
 
         for aid, agent in self.agents_by_id.items():
-            if not agent.ai_model:
-                continue
+            backend = get_backend_for_model(agent.ai_model)
             self.ai_agents[aid] = AgentRegistry.create_agent(
-                backend=Backend.OPENAI, agent=agent, ai_model=agent.ai_model
+                backend=backend, agent=agent, ai_model=agent.ai_model
             )
             # initialize with system prompt
             self.msg_history[aid].append(
@@ -106,29 +120,16 @@ class Engine:
                 )
             )
 
-        # Toy OpenAI Model Factory
-        self._openai_agent_for_message_rendering = AgentRegistry.create_agent(
-            backend=Backend.OPENAI,
-            agent=Agent(
-                agent_id="dummy-agent",
-                role=AgentRole.LIBERAL,
-                ai_model=AIModel.OPENAI_GPT_5_NANO,
-            ),
-            ai_model=AIModel.OPENAI_GPT_5_NANO,
-        )
-
     def _generate_terminal_state(self) -> TerminalState:
-        # TODO: check if I've won, populate it with the correct terminal state
+        # Check if the policy agent won
         winners = self._get_winners()
-
-        # There should be one single policy agent
-        winning_policies = [agent for agent in winners if agent.ai_model is None]
-        assert len(winning_policies) <= 1
+        policy_agent = self.agents_by_id[self.policy_agent_id]
+        policy_won = policy_agent in winners
 
         return TerminalState(
             game_id=self.game_id,
-            reward=1.0 if len(winning_policies) == 1 else 0.0,
-            winners=winning_policies,
+            reward=1.0 if policy_won else 0.0,
+            winners=[policy_agent] if policy_won else [],
         )
 
     async def run(self, input_queue: Queue, output_queue: Queue) -> None:
@@ -161,28 +162,28 @@ class Engine:
                 )
             )
             self.event_counter += 1
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             await self._discourse(input_queue, output_queue)
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             if not await self._vote(chancellor_id, input_queue, output_queue):
                 self.failed_election_tracker += 1
-                await self._log_state_to_file()
+                # await self._log_state_to_file()
 
                 if self.failed_election_tracker >= 3:
                     self._handle_failed_election()
-                    await self._log_state_to_file()
+                    # await self._log_state_to_file()
 
                 self.current_president_idx = (self.current_president_idx + 1) % len(
                     self.president_rotation
                 )
-                await self._log_state_to_file()
+                # await self._log_state_to_file()
                 continue
 
             self.failed_election_tracker = 0
             self.current_chancellor_id = chancellor_id
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             cards_raw = self.deck.draw(3)
             # Assign unique IDs to each card for tracking (frontend use only)
@@ -220,7 +221,7 @@ class Engine:
             event.__dict__["_discarded_card_id"] = discarded_card["id"]
             self.private_events_by_agent[president_id].append(event)
             self.event_counter += 1
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             # cards_with_ids now contains the 2 cards passed to chancellor
             cards_types = [c["type"] for c in cards_with_ids]
@@ -262,7 +263,7 @@ class Engine:
                 )
             )
             self.event_counter += 1
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             if played == PolicyCard.FASCIST:
                 self.fascist_policies_played += 1
@@ -270,20 +271,23 @@ class Engine:
                 self.liberal_policies_played += 1
 
             await self._discourse(input_queue, output_queue)
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
             self.current_president_idx = (self.current_president_idx + 1) % len(
                 self.president_rotation
             )
-            await self._log_state_to_file()
+            # await self._log_state_to_file()
 
-        # TODO: implement the end logic here...
         # Game is over, generate the terminal state
         terminal_state = self._generate_terminal_state()
+        
+        # Get the policy agent's final message history
+        policy_agent = self.ai_agents[self.policy_agent_id]
+        policy_message_history = self.msg_history[self.policy_agent_id]
+        final_messages = policy_agent._convert_message_history(policy_message_history)
+        
         final_model_input = ModelInput(
-            # TODO: the messages here should be the full history of the game
-            # ideally... or the model can store the history itself...
-            messages=[],
+            messages=final_messages,
             tool_call=None,
             terminal_state=terminal_state,
         )
@@ -306,7 +310,8 @@ class Engine:
         for user_input in new_user_inputs:
             self.msg_history[agent_id].append(user_input)
 
-        if agent.ai_model is None:
+        if agent_id == self.policy_agent_id:
+            # This is the policy agent being trained - get external input
             tool_schema = generate_tools(allowed_tools, eligible_agent_ids)
             assert len(tool_schema) == 1
             assert allowed_tools is not None and len(allowed_tools) == 1
@@ -322,13 +327,9 @@ class Engine:
                 openai_schema=tool_schema,
             )
 
-            # Convert message history to messages
+            # Convert message history to messages using the policy agent's message renderer
             message_history = self.msg_history[agent_id]
-            messages = (
-                self._openai_agent_for_message_rendering._convert_message_history(
-                    message_history
-                )
-            )
+            messages = self.ai_agents[agent_id]._convert_message_history(message_history)
 
             model_input = ModelInput(
                 messages=messages,
@@ -340,6 +341,7 @@ class Engine:
             response = ExternalAgentResponseParser.parse(await input_queue.get())
             self.msg_history[agent_id].append(response)
         else:
+            # This is an opponent agent controlled by AI
             response = await self.ai_agents[agent_id].generate_response(
                 self.msg_history[agent_id],
                 allowed_tools=allowed_tools,
@@ -497,7 +499,7 @@ class Engine:
             ]
 
     def _build_system_prompt(self) -> str:
-        rules_prompt = get_base_game_rules_prompt(
+        rules_prompt = get_strategic_game_prompt(
             num_players=len(self.agents_by_id),
             fascist_policies_to_win=self.fascist_policies_to_win,
             liberal_policies_to_win=self.liberal_policies_to_win,

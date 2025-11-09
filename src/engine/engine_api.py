@@ -1,18 +1,18 @@
 import asyncio
+import random
 import traceback
 from asyncio import Queue
 from typing import Dict
-from src.models import AIModel
-from src.engine.engine import Engine
+from src.models import AIModel, Agent, AgentRole
+from src.engine.engine import Engine, ROLES
 from src.engine.deck import Deck
 from src.engine.protocol import ModelInput, ModelOutput, TerminalState
 
-DEFAULT_AI_MODELS = [
+DEFAULT_OPPONENT_MODELS: list[AIModel] = [
     AIModel.OPENAI_GPT_5,
     AIModel.OPENAI_GPT_5_MINI,
     AIModel.OPENAI_GPT_5_NANO,
     AIModel.OPENAI_GPT_4_1,
-    None,
 ]
 
 
@@ -26,7 +26,8 @@ class EngineAPI:
         self,
         game_id: str,
         deck: Deck,
-        ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
+        opponent_models: list[AIModel] = DEFAULT_OPPONENT_MODELS,
+        policy_model: AIModel | None = None,
         fascist_policies_to_win: int = 4,
         liberal_policies_to_win: int = 3,
         log_file: str | None = None,
@@ -35,10 +36,28 @@ class EngineAPI:
         output_queue: Queue = Queue()
 
         self.games[game_id] = (input_queue, output_queue)
+        
+        # Create agents with random role assignment
+        shuffled_roles = random.sample(ROLES, len(ROLES))
+        agent_ids = [f"agent_{i}" for i in range(len(ROLES))]
+        
+        # All opponents + policy agent
+        all_models = opponent_models + ([policy_model] if policy_model else [])
+        assert len(all_models) == len(ROLES)
+        
+        agents = [
+            Agent(
+                agent_id=aid,
+                role=role,
+                ai_model=model,
+                is_policy=(policy_model is not None and i == len(opponent_models))  # Last agent is policy
+            )
+            for i, (aid, role, model) in enumerate(zip(agent_ids, shuffled_roles, all_models))
+        ]
 
         engine = Engine(
             deck=deck,
-            ai_models=ai_models,
+            agents=agents,
             fascist_policies_to_win=fascist_policies_to_win,
             liberal_policies_to_win=liberal_policies_to_win,
             game_id=game_id,
