@@ -51,4 +51,13 @@ class OpenAIAgent(BaseAgent):
             tool_choice="required",
         )
 
-        return self.assistant_response_converter.from_dict(data=response.model_dump())
+        assistant_response = self.assistant_response_converter.from_dict(
+            data=response.model_dump()
+        )
+
+        assistant_response.tool_calls = assistant_response.tool_calls[:1]
+        assistant_response.hydrated_tool_calls = assistant_response.hydrated_tool_calls[
+            :1
+        ]
+
+        return assistant_response
