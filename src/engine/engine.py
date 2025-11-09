@@ -27,6 +27,7 @@ from src.models import (
     ToolFeedback,
     ToolResult,
     EngineEvent,
+    MessageHistory,
 )
 from src.engine.protocol import ModelInput, ToolCallTarget, TerminalState
 from src.agent import BaseAgent
@@ -80,14 +81,28 @@ class Engine:
         self.event_counter: int = 0
         self.public_events: list = []
         self.private_events_by_agent: dict[str, list] = {aid: [] for aid in agent_ids}
+        self.last_seen_event_counter: dict[str, int] = {aid: -1 for aid in agent_ids}
 
         self.ai_agents: dict[str, BaseAgent] = {}
-        self.msg_history: dict[str, list] = {aid: [] for aid in agent_ids}
+        self.msg_history: dict[str, list[MessageHistory]] = {
+            aid: [] for aid in agent_ids
+        }
+        system_prompt = self._build_system_prompt()
+
         for aid, agent in self.agents_by_id.items():
-            if agent.ai_model:
-                self.ai_agents[aid] = AgentRegistry.create_agent(
-                    backend=Backend.OPENAI, agent=agent, ai_model=agent.ai_model
+            if not agent.ai_model:
+                continue
+            self.ai_agents[aid] = AgentRegistry.create_agent(
+                backend=Backend.OPENAI, agent=agent, ai_model=agent.ai_model
+            )
+            # initialize with system prompt
+            self.msg_history[aid].append(
+                UserInput(
+                    history_type="user-input",
+                    user_message=system_prompt,
+                    timestamp=str(uuid.uuid4()),
                 )
+            )
 
     def _generate_terminal_state(self) -> TerminalState:
         # TODO: check if I've won, populate it with the correct terminal state
@@ -251,39 +266,36 @@ class Engine:
         eligible_agent_ids: list[str] | None = None,
     ) -> Tools:
         agent = self.agents_by_id[agent_id]
-        full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
+        new_user_inputs = self._get_new_user_events_since_last_message(agent_id, prompt_guidance)
+
+        for user_input in new_user_inputs:
+            self.msg_history[agent_id].append(user_input)
 
         if agent.ai_model is None:
             tool_schema = generate_tools(allowed_tools, eligible_agent_ids)
-            # Assert that there is only one allowed tool
             assert len(tool_schema) == 1
+            assert allowed_tools is not None and len(allowed_tools) == 1
             tool_name = allowed_tools[0]
             tool_schema = tool_schema[0]
 
-            # Create the tool call target
             tool_call_target = ToolCallTarget(
                 name=tool_name,
                 openai_schema=tool_schema,
             )
 
-            # Create the new model input
+            messages = []
+            for msg in self.msg_history[agent_id]:
+                messages.append(msg.model_dump())
+
             model_input = ModelInput(
-                # TODO: fix the messages here...
-                messages=[{"role": "user", "content": full_prompt}],
+                messages=messages,
                 tool_call=tool_call_target,
                 terminal_state=None,
             )
 
-            # Place the model input back on the queue
             await output_queue.put(model_input)
             response = ExternalAgentResponseParser.parse(await input_queue.get())
         else:
-            user_input = UserInput(
-                history_type="user-input",
-                user_message=full_prompt,
-                timestamp=str(uuid.uuid4()),
-            )
-            self.msg_history[agent_id].append(user_input)
             response = await self.ai_agents[agent_id].generate_response(
                 self.msg_history[agent_id],
                 allowed_tools=allowed_tools,
@@ -439,9 +451,7 @@ class Engine:
                 if agent.role == AgentRole.LIBERAL
             ]
 
-    def _build_prompt_for_agent(self, agent_id: str, action_prompt: str) -> str:
-        agent = self.agents_by_id[agent_id]
-
+    def _build_system_prompt(self) -> str:
         rules_prompt = get_base_game_rules_prompt(
             num_players=len(self.agents_by_id),
             fascist_policies_to_win=self.fascist_policies_to_win,
@@ -450,8 +460,7 @@ class Engine:
             num_liberal_cards=self.deck.total_liberal_cards,
             num_fascist_cards=self.deck.total_fascist_cards,
         )
-
-        game_state = f"""{rules_prompt}
+        return f"""{rules_prompt}
         What is Private:
         - The reasoning tokens your produce in your response
         - The text you produce in your response
@@ -461,7 +470,35 @@ class Engine:
         What is Public:
         - Tool calls that trigger public events are public (PresidentPickChancellorTool, VoteChancellorYesNoTool, ChancellorPlayPolicyTool with the card you choose to play, ChooseAgentToVoteOutTool, AskAgentIfWantsToSpeakTool, AgentResponseToQuestionTool)
         - Note: referencing some other agent in your AskAgentIfWantsToSpeakTool or responding in AgentResponseToQuestionTool are completely public and should not be used for private communication
+        """
 
+    def _get_new_user_events_since_last_message(
+        self, agent_id: str, action_prompt: str
+    ) -> list[UserInput]:
+        agent = self.agents_by_id[agent_id]
+        user_inputs = []
+
+        all_events: list[EngineEvent] = (
+            self.public_events + self.private_events_by_agent[agent_id]
+        )
+        all_events_sorted = sorted(all_events, key=lambda e: e.event_order_counter)
+
+        last_seen = self.last_seen_event_counter[agent_id]
+        new_events = [e for e in all_events_sorted if e.event_order_counter > last_seen]
+
+        for event in new_events:
+            user_inputs.append(
+                UserInput(
+                    history_type="user-input",
+                    user_message=str(event),
+                    timestamp=str(uuid.uuid4()),
+                )
+            )
+
+        if new_events:
+            self.last_seen_event_counter[agent_id] = new_events[-1].event_order_counter
+
+        game_state = f"""
         === GAME STATE ===
         Your Agent ID: {agent_id}
         Your Role: {agent.role}
@@ -474,29 +511,16 @@ class Engine:
         All Agents: {list(self.agents_by_id.keys())}
         """
 
-        all_events: list[EngineEvent] = (
-            self.public_events + self.private_events_by_agent[agent_id]
-        )
-        all_events_sorted = sorted(all_events, key=lambda e: e.event_order_counter)
-
-        events_str = "\n=== ALL EVENTS ===\n"
-        if all_events_sorted:
-            for i, event in enumerate(all_events_sorted, 1):
-                events_str += f"{i}. {event}\n"
-        else:
-            events_str += "No events yet.\n"
-
-        fascist_info_str = ""
-        fascist_ids = [
-            aid
-            for aid, a in self.agents_by_id.items()
-            if a.role in [AgentRole.FASCIST, AgentRole.HITLER] and aid != agent_id
-        ]
-        if agent.role == AgentRole.FASCIST:
-            fascist_info_str = f"\n=== FELLOW FASCISTS ===\n{fascist_ids}\n"
-
         action_str = f"\n=== ACTION REQUIRED ===\n{action_prompt}\n"
-        return game_state + events_str + fascist_info_str + action_str
+        user_inputs.append(
+            UserInput(
+                history_type="user-input",
+                user_message=game_state + action_str,
+                timestamp=str(uuid.uuid4()),
+            )
+        )
+
+        return user_inputs
 
     async def _log_state_to_file(self) -> None:
         if not self.log_file:
@@ -530,6 +554,8 @@ class Engine:
 
     def _write_log(self, state: dict) -> None:
         """Helper method to write log synchronously in executor."""
+        if self.log_file is None:
+            return
         with open(self.log_file, "a") as f:
             f.write("=" * 60 + "\n")
             f.write(json.dumps(state, indent=2) + "\n")
