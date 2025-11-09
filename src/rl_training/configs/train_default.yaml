@@ -4,14 +4,14 @@
 #   modal run src/rl_training/train_modal.py --config configs/train_default.yaml
 
 model:
-  name: "secret-hitler-v1"
+  name: "secret-hitler-v4"
   project: "secret-hitler"
-  base_model: "Qwen/Qwen2.5-14B-Instruct"
+  base_model: "Qwen/Qwen2.5-7B-Instruct"
 
 rollout:
   max_turns: 100
   max_retries: 3
-  simultaneous_games: 32
+  simultaneous_games: 2
   enable_thinking: true
   verbose: false
 

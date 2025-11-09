@@ -47,7 +47,7 @@ image = (
 
 @app.function(
     image=image,
-    gpu="H100:8",  # Will be overridden by config
+    gpu="H100",  # Will be overridden by config
     timeout=7200,  # Will be overridden by config
     secrets=[
         modal.Secret.from_name("wandb-secret"),
