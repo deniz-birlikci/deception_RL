@@ -6,7 +6,7 @@
 model:
   name: "secret-hitler-v1"
   project: "secret-hitler"
-  base_model: "Qwen/Qwen2.5-3B-Instruct"
+  base_model: "Qwen/Qwen2.5-14B-Instruct"
 
 rollout:
   max_turns: 100

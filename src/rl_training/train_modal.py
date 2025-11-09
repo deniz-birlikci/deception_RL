@@ -24,8 +24,11 @@ image = (
         "numpy==1.26.4",
         "s3fs",
         "omegaconf",
+        "pydantic",
+        "pydantic-settings",
     )
     # .add_local_dir("example_2048", "/root/example_2048")
+    .add_local_dir("src", remote_path="/root/src")
 )
 
 
@@ -42,7 +45,10 @@ image = (
     image=image,
     gpu=modal.gpu.H100(),  # Will be overridden by config
     timeout=7200,  # Will be overridden by config
-    secrets=[modal.Secret.from_name("wandb-secret")],  # Will be overridden by config
+    secrets=[
+        modal.Secret.from_name("wandb-secret"),
+        modal.Secret.from_name("rl_deception"),
+    ],  # Will be overridden by config
     # mounts=[modal.Mount.from_local_dir(".", remote_path="/root/2048_example")],
 )
 async def train(config_dict: dict):

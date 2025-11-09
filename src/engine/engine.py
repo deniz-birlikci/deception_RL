@@ -54,12 +54,14 @@ class Engine:
         ai_models: list[AIModel | None],
         fascist_policies_to_win: int,
         liberal_policies_to_win: int,
+        game_id: str,
         log_file: str | None = None,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
         self.hitler_election_threshold = fascist_policies_to_win // 2
+        self.game_id = game_id
         self.log_file = log_file
 
         assert len(ai_models) == len(ROLES)
@@ -104,6 +106,17 @@ class Engine:
                 )
             )
 
+        # Toy OpenAI Model Factory
+        self._openai_agent_for_message_rendering = AgentRegistry.create_agent(
+            backend=Backend.OPENAI,
+            agent=Agent(
+                agent_id="dummy-agent",
+                role=AgentRole.LIBERAL,
+                ai_model=AIModel.OPENAI_GPT_5_NANO,
+            ),
+            ai_model=AIModel.OPENAI_GPT_5_NANO,
+        )
+
     def _generate_terminal_state(self) -> TerminalState:
         # TODO: check if I've won, populate it with the correct terminal state
         winners = self._get_winners()
@@ -113,6 +126,7 @@ class Engine:
         assert len(winning_policies) <= 1
 
         return TerminalState(
+            game_id=self.game_id,
             reward=1.0 if len(winning_policies) == 1 else 0.0,
             winners=winning_policies,
         )
@@ -266,7 +280,9 @@ class Engine:
         eligible_agent_ids: list[str] | None = None,
     ) -> Tools:
         agent = self.agents_by_id[agent_id]
-        new_user_inputs = self._get_new_user_events_since_last_message(agent_id, prompt_guidance)
+        new_user_inputs = self._get_new_user_events_since_last_message(
+            agent_id, prompt_guidance
+        )
 
         for user_input in new_user_inputs:
             self.msg_history[agent_id].append(user_input)
@@ -283,9 +299,13 @@ class Engine:
                 openai_schema=tool_schema,
             )
 
-            messages = []
-            for msg in self.msg_history[agent_id]:
-                messages.append(msg.model_dump())
+            # Convert message history to messages
+            message_history = self.msg_history[agent_id]
+            messages = (
+                self._openai_agent_for_message_rendering._convert_message_history(
+                    message_history
+                )
+            )
 
             model_input = ModelInput(
                 messages=messages,
@@ -295,6 +315,7 @@ class Engine:
 
             await output_queue.put(model_input)
             response = ExternalAgentResponseParser.parse(await input_queue.get())
+            self.msg_history[agent_id].append(response)
         else:
             response = await self.ai_agents[agent_id].generate_response(
                 self.msg_history[agent_id],

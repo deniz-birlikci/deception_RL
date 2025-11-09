@@ -62,6 +62,9 @@ class TrainLoopConfig:
     gpu_memory_utilization: float = 0.7
     """GPU memory utilization for the model."""
 
+    tensor_parallel_size: int = 1
+    """Tensor parallel size for the model."""
+
 
 @dataclass
 class TrainingConfig:

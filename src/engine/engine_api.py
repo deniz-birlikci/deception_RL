@@ -41,6 +41,7 @@ class EngineAPI:
             ai_models=ai_models,
             fascist_policies_to_win=fascist_policies_to_win,
             liberal_policies_to_win=liberal_policies_to_win,
+            game_id=game_id,
             log_file=log_file,
         )
         self.engines[game_id] = engine

@@ -3,13 +3,7 @@ from .base_agent import BaseAgent, log_messages
 from ..models import AIModel, MessageHistory, AssistantResponse, Backend, Agent
 from ..model_converters import BaseModelConverterFactory
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-# Handle different OpenAI versions
-try:
-    from openai.types.chat import ChatCompletionToolUnionParam
-except ImportError:
-    # For older OpenAI versions, use Any as fallback
-    ChatCompletionToolUnionParam = Any
+from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolParam
 from ..tools import generate_tools
 from ..env import settings
 
@@ -51,22 +45,22 @@ class OpenAIAgent(BaseAgent):
         tools = generate_tools(allowed_tools, eligible_agent_ids)
 
         # DEBUG: Print message history to identify the issue
-        print("=== MESSAGE HISTORY BEING SENT TO OPENAI ===")
-        for i, msg in enumerate(converted_history):
-            print(f"Message {i}: role={msg.get('role')}")
-            if msg.get('role') == 'assistant' and 'tool_calls' in msg:
-                print(f"  Has {len(msg['tool_calls'])} tool calls")
-                for tc in msg['tool_calls']:
-                    print(f"    Tool call ID: {tc.get('id')}")
-            elif msg.get('role') == 'tool':
-                print(f"  Tool response for: {msg.get('tool_call_id')}")
-            print(f"  Content: {str(msg.get('content', 'N/A'))[:100]}")
-        print("=== END MESSAGE HISTORY ===")
+        # print("=== MESSAGE HISTORY BEING SENT TO OPENAI ===")
+        # for i, msg in enumerate(converted_history):
+        #     print(f"Message {i}: role={msg.get('role')}")
+        #     if msg.get('role') == 'assistant' and 'tool_calls' in msg:
+        #         print(f"  Has {len(msg['tool_calls'])} tool calls")
+        #         for tc in msg['tool_calls']:
+        #             print(f"    Tool call ID: {tc.get('id')}")
+        #     elif msg.get('role') == 'tool':
+        #         print(f"  Tool response for: {msg.get('tool_call_id')}")
+        #     print(f"  Content: {str(msg.get('content', 'N/A'))[:100]}")
+        # print("=== END MESSAGE HISTORY ===")
 
         response = await self.client.chat.completions.create(
             model=self.ai_model,
             messages=cast(list[ChatCompletionMessageParam], converted_history),
-            tools=cast(list[ChatCompletionToolUnionParam], tools),
+            tools=cast(list[ChatCompletionToolParam], tools),
             tool_choice="required",
         )
 

@@ -9,7 +9,7 @@ result keeps reasoning and tool call distinct.
 import modal
 import time
 
-app = modal.App("qwen7b-intermediate-reasoning")
+app = modal.App("qwen14b-intermediate-reasoning")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -20,7 +20,7 @@ image = (
     )
 )
 
-MODEL_NAME = "Qwen/Qwen2.5-7B-Instruct"
+MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
 
 MAKE_MOVE_TOOL = {
     "type": "function",
@@ -55,7 +55,7 @@ MAKE_MOVE_TOOL = {
 )
 async def inference_with_reasoning(board_state: str):
     """
-    Run Qwen7B inference to obtain reasoning first, then a tool call.
+    Run Qwen14B inference to obtain reasoning first, then a tool call.
     """
     import art
     from art.local import LocalBackend
@@ -126,15 +126,24 @@ async def inference_with_reasoning(board_state: str):
     if message.tool_calls:
         tc = message.tool_calls[0]
         tool_call = {
-            "name": tc.function.name,
-            "arguments": tc.function.arguments,
+            "name": str(tc.function.name),
+            "arguments": str(tc.function.arguments),
+        }
+
+    # Convert to plain dicts to avoid pickling issues with pydantic
+    usage_dict = None
+    if hasattr(response, "usage") and response.usage:
+        usage_dict = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
         }
 
     return {
         "reasoning": reasoning_text,
         "tool_call": tool_call,
-        "finish_reason": choice.finish_reason,
-        "usage": response.usage.model_dump() if hasattr(response, "usage") else None,
+        "finish_reason": str(choice.finish_reason) if choice.finish_reason else None,
+        "usage": usage_dict,
         "generation_time_seconds": time.perf_counter() - start_time,
     }
 
@@ -152,7 +161,7 @@ def main():
 """
 
     print("=" * 80)
-    print("QWEN7B REASONING + TOOL CALL")
+    print("QWEN3-14B REASONING + TOOL CALL")
     print("=" * 80)
     print("\nBoard State:")
     print(board_state)
