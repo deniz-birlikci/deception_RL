@@ -292,6 +292,122 @@ def get_policy_role(engine_api: EngineAPI, game_id: str) -> str | None:
     return policy_agent.role.value
 
 
+def _analyze_discard_behavior(trajectory: art.Trajectory, policy_role: str | None) -> None:
+    """
+    Analyze the policy agent's discard behavior during the game.
+    
+    Tracks when the policy agent discards their own team's cards when they have
+    both liberal and fascist cards available (strategic discard).
+    
+    Args:
+        trajectory: The completed trajectory
+        policy_role: The role assigned to the policy agent (liberal/fascist/hitler)
+    """
+    if policy_role is None:
+        return
+    
+    # Determine which card type is "own" for this role
+    # Liberal discards liberal = own card
+    # Fascist/Hitler discards fascist = own card
+    own_card_type = "liberal" if policy_role == "liberal" else "fascist"
+    
+    messages_and_choices = trajectory.messages_and_choices
+    
+    # Iterate through messages to find discard prompts
+    i = 0
+    while i < len(messages_and_choices):
+        item = messages_and_choices[i]
+        
+        # Look for user messages with discard prompts
+        if isinstance(item, dict) and item.get("role") == "user":
+            content = item.get("content", "")
+            
+            # Check for president discard prompt
+            if "Cards:" in content and "Discard index (0-2)" in content:
+                cards, discard_idx = _parse_discard_action(messages_and_choices, i)
+                if cards is not None and discard_idx is not None and len(cards) == 3:
+                    trajectory.metrics["discard_as_president_count"] += 1
+                    # Check if both card types are available
+                    if "liberal" in cards and "fascist" in cards:
+                        discarded_card = cards[discard_idx]
+                        if discarded_card == own_card_type:
+                            trajectory.metrics["discard_as_president_own_card_count"] += 1
+            
+            # Check for chancellor discard prompt
+            elif "Cards:" in content and "Play index (0-1)" in content:
+                cards, play_idx = _parse_discard_action(messages_and_choices, i)
+                if cards is not None and play_idx is not None and len(cards) == 2:
+                    trajectory.metrics["discard_as_chancellor_count"] += 1
+                    # Check if both card types are available
+                    if "liberal" in cards and "fascist" in cards:
+                        # Chancellor discards the card they DON'T play
+                        discard_idx = 1 - play_idx
+                        discarded_card = cards[discard_idx]
+                        if discarded_card == own_card_type:
+                            trajectory.metrics["discard_as_chancellor_own_card_count"] += 1
+        
+        i += 1
+
+
+def _parse_discard_action(
+    messages_and_choices: list, user_msg_idx: int
+) -> tuple[list[str] | None, int | None]:
+    """
+    Parse cards and discard/play choice from a discard prompt.
+    
+    Args:
+        messages_and_choices: List of messages and choices
+        user_msg_idx: Index of the user message with the discard prompt
+    
+    Returns:
+        Tuple of (cards_list, chosen_index) or (None, None) if parsing fails
+    """
+    import re
+    
+    user_msg = messages_and_choices[user_msg_idx]
+    content = user_msg.get("content", "")
+    
+    # Extract cards from the prompt
+    # Format: "Cards: [PolicyCard.LIBERAL, PolicyCard.FASCIST, ...]"
+    cards_match = re.search(r"Cards: \[(.*?)\]", content)
+    if not cards_match:
+        return None, None
+    
+    cards_str = cards_match.group(1)
+    # Parse card types - extract just "liberal" or "fascist"
+    cards = []
+    for card in cards_str.split(","):
+        if "LIBERAL" in card.upper():
+            cards.append("liberal")
+        elif "FASCIST" in card.upper():
+            cards.append("fascist")
+    
+    if not cards:
+        return None, None
+    
+    # Find the next assistant message with tool call
+    for j in range(user_msg_idx + 1, len(messages_and_choices)):
+        item = messages_and_choices[j]
+        
+        # Check if it's a Choice object with tool calls
+        if isinstance(item, Choice):
+            if item.message.tool_calls:
+                tool_call = item.message.tool_calls[0]
+                try:
+                    args = json.loads(tool_call.function.arguments)
+                    # Look for card_index in the arguments
+                    if "card_index" in args:
+                        return cards, args["card_index"]
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        
+        # Stop if we hit another user message (moved to next turn)
+        if isinstance(item, dict) and item.get("role") == "user":
+            break
+    
+    return None, None
+
+
 def get_messages_from_trajectory(
     messages_and_choices: art.types.MessagesAndChoices,
 ) -> Messages:
@@ -344,6 +460,9 @@ async def rollout(
     Returns:
         Trajectory containing the game history and reward
     """
+    # Start timing the entire rollout
+    rollout_start_time = time.perf_counter()
+    
     # Initialize the game
     game_id = str(uuid.uuid4())
     policy_ai_model = AIModel.QWEN_POLICY_AGENT
@@ -377,6 +496,11 @@ async def rollout(
             "engine_create_time_ms": create_time_ms,
             "engine_execute_time_ms": 0,
             "total_engine_time_ms": create_time_ms,
+            # Discard tracking for policy agent only
+            "discard_as_president_count": 0,
+            "discard_as_president_own_card_count": 0,
+            "discard_as_chancellor_count": 0,
+            "discard_as_chancellor_own_card_count": 0,
         },
         # tools=TOOLS,  # Store tool schemas in trajectory
     )
@@ -535,5 +659,12 @@ async def rollout(
                 messages_and_choices=trajectory.messages_and_choices,
                 reward=trajectory.reward,
             )
+
+    # Calculate rollout duration
+    rollout_duration_seconds = time.perf_counter() - rollout_start_time
+    trajectory.metrics["rollout_duration_seconds"] = rollout_duration_seconds
+    
+    # Analyze discard behavior for the policy agent
+    _analyze_discard_behavior(trajectory, policy_role)
 
     return trajectory

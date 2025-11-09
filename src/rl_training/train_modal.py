@@ -121,8 +121,7 @@ async def gather_rollouts_with_timeout(
                 trajectory = await task
                 completed_trajectories.append(trajectory)
             except Exception as e:
-                if verbose:
-                    print(f"Rollout failed with exception: {e}")
+                print(f"Rollout failed with exception: {e}")
                 abandoned_count += 1
 
         # Cancel pending tasks (these timed out)
@@ -180,7 +179,7 @@ async def gather_rollouts_with_timeout(
 
 @app.function(
     image=image,
-    gpu="H100",  # Will be overridden by config
+    gpu="H100:4",  # Will be overridden by config
     timeout=7200,  # Will be overridden by config
     secrets=[
         modal.Secret.from_name("wandb-secret"),
@@ -198,6 +197,7 @@ async def train(config_dict: dict):
     # NOW import these - they run in Modal's environment with all deps
     from .rollout import rollout
     from .config import TrainingConfig
+    from .metrics_utils import compute_role_based_metrics, compute_oversampling_role_metrics
     from art.local import LocalBackend
     import weave
     import wandb
@@ -271,12 +271,28 @@ async def train(config_dict: dict):
                 enable_thinking=config.rollout.enable_thinking,
                 verbose=config.rollout.verbose,
             )
+            print(f"Oversampling metrics: {oversampling_metrics}")
+            
+            # Compute role-based oversampling metrics
+            completed_trajs = []
+            for group in train_groups:
+                completed_trajs.extend(group.trajectories)
+            
+            oversampling_role_metrics = compute_oversampling_role_metrics(
+                completed_trajectories=completed_trajs,
+                total_launched=oversampling_metrics["total_launched"],
+                total_abandoned=oversampling_metrics["total_abandoned"],
+            )
             
             # Log oversampling metrics to wandb
             wandb.log({
                 f"oversampling/{k}": v 
                 for k, v in oversampling_metrics.items()
             }, step=i)
+            
+            # Log oversampling role metrics
+            if oversampling_role_metrics:
+                wandb.log(oversampling_role_metrics, step=i)
         else:
             # Standard rollout without oversampling
             train_groups = await art.gather_trajectory_groups(
@@ -298,6 +314,12 @@ async def train(config_dict: dict):
                 pbar_desc="gather",
                 max_exceptions=10,
             )
+
+        # Compute and log role-based metrics for all trajectories
+        role_metrics = compute_role_based_metrics(train_groups)
+        if role_metrics:
+            wandb.log(role_metrics, step=i)
+            print(f"Role-based metrics logged: {len(role_metrics)} metrics")
 
         await model.train(
             train_groups,

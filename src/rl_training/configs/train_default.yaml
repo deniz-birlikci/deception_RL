@@ -15,7 +15,7 @@ rollout:
   enable_thinking: true
   verbose: false
   enable_oversampling: true
-  oversampling_concurrency: 50
+  oversampling_concurrency: 25
   oversampling_timeout_seconds: 600 # 10 minutes
 
 train:
