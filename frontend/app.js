@@ -86,12 +86,10 @@ function renderPlayers(players) {
     // Add role-based color classes to header
     if (player.role.includes("Liberal")) {
       roleEl.classList.add("liberal");
+    } else if (player.role.includes("Hitler")) {
+      roleEl.classList.add("hitler");
     } else if (player.role.includes("Fascist")) {
-      if (player.name === "Hitler") {
-        roleEl.classList.add("hitler");
-      } else {
-        roleEl.classList.add("fascist");
-      }
+      roleEl.classList.add("fascist");
     }
     
     card.appendChild(nameEl);
@@ -168,12 +166,10 @@ function renderChat(events, players) {
         meta.classList.add("eliminated");
       } else if (player?.role?.includes("Liberal")) {
         meta.classList.add("liberal");
+      } else if (player?.role?.includes("Hitler")) {
+        meta.classList.add("hitler");
       } else if (player?.role?.includes("Fascist")) {
-        if (player.name === "Hitler") {
-          meta.classList.add("hitler");
-        } else {
-          meta.classList.add("fascist");
-        }
+        meta.classList.add("fascist");
       }
       
       messageContainer.appendChild(meta);
@@ -207,8 +203,18 @@ function renderChat(events, players) {
         return player?.name || match; // Keep original if no name found
       });
       
-      const playerName = (player?.model === null || player?.is_you) ? `${player?.name || ev.agent_id} (You)` : (player?.name || ev.agent_id);
-      const targetName = targetPlayer?.name || ev.in_response_to_agent_id;
+      let playerName = player?.name || ev.agent_id;
+      if (player?.name === "Hitler") {
+        const agentIndex = players.indexOf(player);
+        playerName = `Agent ${agentIndex} (Hitler)`;
+      } else if (player?.model === null || player?.is_you) {
+        playerName = `${playerName} (You)`;
+      }
+      let targetName = targetPlayer?.name || ev.in_response_to_agent_id;
+      if (targetPlayer?.name === "Hitler") {
+        const agentIndex = players.indexOf(targetPlayer);
+        targetName = `Agent ${agentIndex} (Hitler)`;
+      }
       
       const messageContainer = el("div", "message-container");
       const meta = el("div", "chat-meta", `${playerName} → @${targetName}`);
@@ -220,12 +226,10 @@ function renderChat(events, players) {
         meta.classList.add("eliminated");
       } else if (player?.role?.includes("Liberal")) {
         meta.classList.add("liberal");
+      } else if (player?.role?.includes("Hitler")) {
+        meta.classList.add("hitler");
       } else if (player?.role?.includes("Fascist")) {
-        if (player.name === "Hitler") {
-          meta.classList.add("hitler");
-        } else {
-          meta.classList.add("fascist");
-        }
+        meta.classList.add("fascist");
       }
       
       messageContainer.appendChild(meta);
@@ -268,7 +272,7 @@ function renderChat(events, players) {
 
     if (asText) {
       const messageContainer = el("div", "message-container");
-      const meta = el("div", "chat-meta", new Date().toLocaleTimeString());
+      const meta = el("div", "chat-meta", "");
       const bubble = el("div", "chat-item event");
       bubble.textContent = asText;
       

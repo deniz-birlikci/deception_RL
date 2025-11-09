@@ -18,14 +18,99 @@ import json
 def log_messages(func):
     """Decorator to log messages sent to the model in a text file."""
 
+    # ANSI color codes
+    YELLOW = "\033[93m"
+    MAGENTA = "\033[95m"
+    CYAN = "\033[96m"
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+
+    def wrap_text(text: str, width: int = 120) -> str:
+        """Wrap text to specified width, preserving paragraphs."""
+        if not text:
+            return ""
+
+        # Handle different types of content
+        if isinstance(text, dict) or isinstance(text, list):
+            text = json.dumps(text, indent=2)
+        else:
+            text = str(text)
+
+        # Simple line wrapping at specified width
+        lines = []
+        for line in text.split("\n"):
+            if len(line) <= width:
+                lines.append(line)
+            else:
+                # Wrap long lines
+                while len(line) > width:
+                    lines.append(line[:width])
+                    line = line[width:]
+                if line:
+                    lines.append(line)
+        return "\n".join(lines)
+
+    def format_message_pretty(message: dict, role_color: str, role_name: str) -> str:
+        """Format a single message with color and text wrapping."""
+        output = []
+        output.append(f"{BOLD}{role_color}{'=' * 120}{RESET}")
+        output.append(f"{BOLD}{role_color}[{role_name.upper()}]{RESET}")
+        output.append(f"{role_color}{'-' * 120}{RESET}")
+
+        # Handle different message structures
+        if not isinstance(message, dict):
+            wrapped = wrap_text(message)
+            output.append(f"{role_color}{wrapped}{RESET}")
+        elif "content" in message:
+            content = message["content"]
+            if isinstance(content, str):
+                wrapped = wrap_text(content)
+                output.append(f"{role_color}{wrapped}{RESET}")
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            wrapped = wrap_text(item.get("text", ""))
+                            output.append(f"{role_color}{wrapped}{RESET}")
+                        elif item.get("type") == "tool_use":
+                            output.append(
+                                f"{role_color}[TOOL USE: {item.get('name', 'unknown')}]{RESET}"
+                            )
+                            wrapped = wrap_text(item.get("input", {}))
+                            output.append(f"{role_color}{wrapped}{RESET}")
+                        elif item.get("type") == "tool_result":
+                            output.append(
+                                f"{role_color}[TOOL RESULT: {item.get('tool_use_id', 'unknown')}]{RESET}"
+                            )
+                            wrapped = wrap_text(item.get("content", ""))
+                            output.append(f"{role_color}{wrapped}{RESET}")
+                        else:
+                            wrapped = wrap_text(item)
+                            output.append(f"{role_color}{wrapped}{RESET}")
+                    else:
+                        wrapped = wrap_text(item)
+                        output.append(f"{role_color}{wrapped}{RESET}")
+            else:
+                wrapped = wrap_text(content)
+                output.append(f"{role_color}{wrapped}{RESET}")
+        else:
+            # Fallback for other structures
+            wrapped = wrap_text(message)
+            output.append(f"{role_color}{wrapped}{RESET}")
+
+        output.append(f"{role_color}{'=' * 120}{RESET}")
+        output.append("")
+        return "\n".join(output)
+
     @wraps(func)
     async def wrapper(self, message_history: list[MessageHistory], *args, **kwargs):
         # Create logs directory if it doesn't exist
         logs_dir = Path("logs")
         logs_dir.mkdir(exist_ok=True)
 
-        # Create a unique log file name based on the AI model
+        # Create log file names based on the AI model
         log_file = logs_dir / f"{self.agent.agent_id}_messages.log"
+        pretty_log_file = logs_dir / f"{self.agent.agent_id}_messages_pretty.log"
 
         # Get current timestamp
         timestamp = datetime.now().isoformat()
@@ -33,7 +118,7 @@ def log_messages(func):
         # Convert message history to a loggable format
         converted_history = self._convert_message_history(message_history)
 
-        # Write to log file
+        # Write to JSON log file
         with open(log_file, "a") as f:
             f.write("=" * 80 + "\n")
             f.write(f"Timestamp: {timestamp}\n")
@@ -41,6 +126,28 @@ def log_messages(func):
             f.write(json.dumps(converted_history, indent=2))
             f.write("\n")
             f.write("=" * 80 + "\n\n")
+
+        # Write to pretty log file with colors
+        with open(pretty_log_file, "a") as f:
+            f.write(f"{BOLD}{'=' * 120}{RESET}\n")
+            f.write(f"{BOLD}Timestamp: {timestamp}{RESET}\n")
+            f.write(f"{BOLD}{'=' * 120}{RESET}\n\n")
+
+            for message in converted_history:
+                role = message.get("role", "unknown")
+
+                if role == "system":
+                    formatted = format_message_pretty(message, YELLOW, "system")
+                elif role == "user":
+                    formatted = format_message_pretty(message, MAGENTA, "user")
+                elif role == "assistant":
+                    formatted = format_message_pretty(message, CYAN, "assistant")
+                else:
+                    formatted = format_message_pretty(message, RESET, role)
+
+                f.write(formatted + "\n")
+
+            f.write("\n\n")
 
         # Call the original function
         return await func(self, message_history, *args, **kwargs)

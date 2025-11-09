@@ -1,17 +1,19 @@
 import json
+import uuid
 
 import openai
 import requests
 import weave
 from dotenv import load_dotenv
 
-from .utils import (
-    ModelInput,
+from src.engine.protocol import (
+    ModelOutput,
     TerminalState,
     ToolCallTarget,
-    create_game,
-    execute_action,
 )
+from src.engine.engine_api import EngineAPI
+from src.engine.deck import Deck
+from src.models import AIModel
 import art
 from art.types import Messages
 
@@ -20,6 +22,18 @@ load_dotenv()
 
 MAX_RETRIES = 3
 MAX_TURNS = 100  # Prevent infinite games
+
+# Default training completition models
+DEFAULT_TRAINING_MODEL_SETUP = [
+    AIModel.OPENAI_GPT_5,
+    AIModel.OPENAI_GPT_5_MINI,
+    AIModel.OPENAI_GPT_5_NANO,
+    AIModel.OPENAI_GPT_4_1,
+    None,
+]
+
+# Global engine API instance
+_engine_api = EngineAPI()
 
 
 class EngineException(Exception):
@@ -200,11 +214,11 @@ async def get_completion_with_retries(
     raise EngineException(f"Failed after {max_retries} retries")
 
 
-def format_tool_response_for_engine(tool_name: str, arguments: dict) -> str:
+def format_tool_response_for_game_engine(tool_name: str, arguments: dict) -> str:
     """
-    Format the tool call into a JSON string for the engine to parse.
+    Format the tool call into a JSON string for the game engine to parse.
 
-    The engine expects:
+    The game engine expects:
     {
         "tool_name": "president-pick-chancellor",
         "arguments": {"agent_id": "..."}
@@ -243,14 +257,20 @@ async def rollout(
     Returns:
         Trajectory containing the game history and reward
     """
-    # Initialize the game and get the first ModelInput
-    model_input: ModelInput = await create_game()
+    # Initialize the game
+    game_id = str(uuid.uuid4())
+    model_input = await _engine_api.create(
+        game_id=game_id,
+        deck=Deck(),
+        ai_models=DEFAULT_TRAINING_MODEL_SETUP,
+    )
 
     trajectory = art.Trajectory(
         messages_and_choices=[],
         metadata={
             "step": step,
             "validation": is_validation,
+            "game_id": game_id,
         },
         reward=0,
         metrics={
@@ -286,7 +306,8 @@ async def rollout(
             game_over = True
             terminal_state: TerminalState = model_input.terminal_state
             trajectory.reward = terminal_state.reward
-            trajectory.metadata["game_id"] = terminal_state.game_id
+            # Validate game_id matches (sanity check)
+            assert terminal_state.game_id == game_id, f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
 
             if verbose:
                 print(f"\n{'=' * 60}")
@@ -316,8 +337,12 @@ async def rollout(
             trajectory.metrics["total_retries"] += num_retries
 
             # Format for engine and execute
-            engine_input = format_tool_response_for_engine(tool_name, arguments)
-            model_input = await execute_action(engine_input)
+            model_function_calling_json = format_tool_response_for_game_engine(
+                tool_name, arguments
+            )
+            model_input = await _engine_api.execute(
+                game_id, ModelOutput(function_calling_json=model_function_calling_json)
+            )
 
         except (openai.LengthFinishReasonError, EngineException):
             # Fatal errors - propagate up to @art.retry decorator

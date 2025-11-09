@@ -118,7 +118,10 @@ async def api_start_game(game_id: str, background_tasks: BackgroundTasks) -> Dic
             await _engine.run(input_queue, output_queue)
             print(f"Game {game_id} completed!")
         except Exception as e:
+            import traceback
             print(f"Error running game: {e}")
+            print(f"Full traceback:")
+            traceback.print_exc()
         finally:
             _game_running = False
     

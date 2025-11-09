@@ -18,11 +18,12 @@ class ExternalAgentResponseParser:
         Expected function_calling_json format:
         {
             "tool_name": "president-pick-chancellor",
-            "arguments": {"agent_id": "..."}
+            "arguments": {"agent_id": "...", "reasoning": "..."}
         }
         
-        The reasoning field from ModelOutput will be included in the 
-        AssistantResponse for logging/debugging purposes.
+        If 'reasoning' is present in arguments, it will be extracted and stored
+        in AssistantResponse.reasoning (taking precedence over ModelOutput.reasoning).
+        The reasoning field is then removed from arguments before tool hydration.
         """
         # Obtain the function calling JSON and reasoning from the model output
         function_calling_json = model_output.function_calling_json
@@ -40,6 +41,9 @@ class ExternalAgentResponseParser:
         if not tool_name:
             raise ValueError("Response must contain 'tool_name'")
 
+        # Extract reasoning from arguments if present
+        reasoning = arguments.pop("reasoning", reasoning)
+
         tool_call = ToolCall(
             tool_call_id=str(uuid.uuid4()),
             tool_name=tool_name,
@@ -50,7 +54,7 @@ class ExternalAgentResponseParser:
 
         return AssistantResponse(
             history_type="assistant-response",
-            reasoning=reasoning or None,
+            reasoning=reasoning,
             text_response=None,
             tool_calls=[tool_call],
             hydrated_tool_calls=[hydrated_tool],

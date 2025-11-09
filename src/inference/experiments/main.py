@@ -155,8 +155,14 @@ async def inference_with_reasoning_and_tools(
     
     if force_tool:
         params["tool_choice"] = {"type": "function", "function": {"name": "make_move"}}
-    
-    if enable_thinking:
+
+    qwen_model = "qwen3" in model_name.lower()
+    if qwen_model:
+        if enable_thinking:
+            params["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
+        else:
+            params["extra_body"] = {}
+    elif enable_thinking:
         params["extra_body"] = {"chat_template_kwargs": {"enable_thinking": True}}
     
     # Generate
@@ -168,6 +174,7 @@ async def inference_with_reasoning_and_tools(
     choice = response.choices[0]
     message = choice.message
     
+    content = message.content if getattr(message, "content", None) is not None else ""
     reasoning_content = getattr(message, 'reasoning_content', None)
     
     tool_call = None
@@ -181,6 +188,7 @@ async def inference_with_reasoning_and_tools(
     return {
         "reasoning_content": reasoning_content,
         "tool_call": tool_call,
+        "assistant_content": content,
         "generation_time_seconds": generation_time,
         "total_time_seconds": time.perf_counter() - start_time,
         "finish_reason": choice.finish_reason,

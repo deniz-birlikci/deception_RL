@@ -26,6 +26,7 @@ image = (
         "omegaconf",
     )
     # .add_local_dir("example_2048", "/root/example_2048")
+    .add_local_dir("src", remote_path="/root/src")
 )
 
 

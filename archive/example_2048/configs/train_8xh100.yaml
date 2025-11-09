@@ -1,0 +1,36 @@
+# Training configuration for 8xH100 parallel training
+# 
+# Usage:
+#   modal run example_2048/train_modal.py --config-path configs/train_8xh100.yaml
+#
+# This will spawn 8 independent training jobs in parallel, each on one H100 GPU.
+# Since tensor_parallel_size=1, each job runs independently (data parallelism).
+
+model:
+  name: "2048-qwen3-thinking-8xh100-v1"
+  project: "2048"
+  base_model: "Qwen/Qwen3-4B-Thinking-2507"
+
+rollout:
+  max_turns: 200
+  max_retries: 3
+  simultaneous_games: 18
+  enable_ruler: true
+  enable_thinking: true  # Enable Qwen3 thinking mode (reasoning before tool calls)
+  verbose: false
+
+train:
+  train_steps: 40
+  learning_rate: 1e-5
+  random_seed: 42  # Each parallel job will use seed + job_index
+
+  # max sequence length
+  max_seq_length: 8192
+  gpu_memory_utilization: 0.7
+  tensor_parallel_size: 1  # No tensor parallelism
+
+modal:
+  gpu_type: "H100"
+  timeout: 7200  # 2 hours
+  num_parallel_jobs: 8  # 8 parallel training jobs
+
