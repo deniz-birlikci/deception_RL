@@ -43,6 +43,10 @@ class OpenAIAgent(BaseAgent):
         converted_history = self._convert_message_history(message_history)
 
         tools = generate_tools(allowed_tools, eligible_agent_ids)
+        
+        # Add reasoning field as first parameter to all tools
+        from src.engine.protocol import add_reasoning_to_tool_schema
+        tools = [add_reasoning_to_tool_schema(tool) for tool in tools]
 
         # DEBUG: Print message history to identify the issue
         # print("=== MESSAGE HISTORY BEING SENT TO OPENAI ===")

@@ -293,6 +293,10 @@ class Engine:
             assert allowed_tools is not None and len(allowed_tools) == 1
             tool_name = allowed_tools[0]
             tool_schema = tool_schema[0]
+            
+            # Add reasoning field as first parameter
+            from src.engine.protocol import add_reasoning_to_tool_schema
+            tool_schema = add_reasoning_to_tool_schema(tool_schema)
 
             tool_call_target = ToolCallTarget(
                 name=tool_name,

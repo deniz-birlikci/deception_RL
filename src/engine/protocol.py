@@ -45,7 +45,8 @@ class ModelOutput(BaseModel):
 
 def add_reasoning_to_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """
-    Add a required 'reasoning' field to a tool schema.
+    Add a required 'reasoning' field to a tool schema as the FIRST property.
+    This ensures the model generates reasoning before other parameters.
     """
     import copy
     
@@ -54,20 +55,29 @@ def add_reasoning_to_tool_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if "function" in schema and "parameters" in schema["function"]:
         params = schema["function"]["parameters"]
         
-        # Add reasoning property
-        if "properties" not in params:
-            params["properties"] = {}
+        # Get existing properties (or create empty dict)
+        existing_properties = params.get("properties", {})
         
-        params["properties"]["reasoning"] = {
-            "type": "string",
-            "description": "Give your reasoning behind the action that you are taking."
+        # Create new properties dict with reasoning FIRST
+        new_properties = {
+            "reasoning": {
+                "type": "string",
+                "description": "Explain your reasoning behind the action you are taking. Think step-by-step about why this is the right choice."
+            }
         }
+        
+        # Add existing properties after reasoning
+        for key, value in existing_properties.items():
+            if key != "reasoning":  # Don't duplicate if already exists
+                new_properties[key] = value
+        
+        params["properties"] = new_properties
         
         # Add to required fields
         if "required" not in params:
             params["required"] = []
         
         if "reasoning" not in params["required"]:
-            params["required"].append("reasoning")
+            params["required"].insert(0, "reasoning")  # Insert at beginning
     
     return schema
