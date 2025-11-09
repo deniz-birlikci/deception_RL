@@ -10,6 +10,10 @@ import art
 # Create Modal app
 app = modal.App("SecretHitler-training")
 
+checkpoint_volume = modal.Volume.from_name(
+    "art-secret-hitler-checkpoints", create_if_missing=True
+)
+
 # Define the Modal image with all dependencies
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -49,7 +53,7 @@ image = (
         modal.Secret.from_name("wandb-secret"),
         modal.Secret.from_name("art-secrets"),
     ],  # Will be overridden by config
-    # mounts=[modal.Mount.from_local_dir(".", remote_path="/root/2048_example")],
+    volumes={"/root/.art": checkpoint_volume},
 )
 async def train(config_dict: dict):
     """
