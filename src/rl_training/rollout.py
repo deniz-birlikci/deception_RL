@@ -178,6 +178,7 @@ async def get_completion_with_retries(
 
             choice = chat_completion.choices[0]
             print(f"[uuid={type_shit}] choice={choice}")
+
             trajectory.messages_and_choices.append(choice)
 
             if verbose:
@@ -288,6 +289,7 @@ async def rollout(
 
     num_turns = 0
     game_over = False
+    messages_added_count = 0  # Track how many messages we've already added
 
     if verbose:
         print(f"\n{'=' * 60}")
@@ -302,9 +304,30 @@ async def rollout(
             print(f"\n--- Turn {num_turns} ---")
             print(f"Messages to model ({len(model_input.messages)} messages)")
 
-        # Add the current game state messages to the trajectory
-        for msg in model_input.messages:
-            trajectory.messages_and_choices.append(msg)
+        # Add only NEW messages to trajectory (avoid duplicates)
+        def clean_msg(msg: dict) -> dict:
+            """Convert multi-modal message format to plain string format for training."""
+            msg = msg.copy()  # Don't mutate the original
+            content = msg.get("content", [])
+            if isinstance(content, list) and len(content) > 0:
+                if isinstance(content[0], dict) and content[0].get("type") == "text":
+                    # Extract JUST the text string
+                    msg["content"] = content[0].get("text", "")
+            return msg
+        
+        # Only add messages we haven't seen before
+        # Skip assistant messages since we add Choice objects directly (line 184)
+        new_messages = model_input.messages[messages_added_count:]
+        for msg in new_messages:
+            if msg.get("role") == "assistant":
+                # Skip assistant messages - we already added them as Choice objects
+                continue
+            cleaned = clean_msg(msg)
+            print(f"[uuid={game_id}] cleaned={cleaned}")
+            trajectory.messages_and_choices.append(cleaned)
+        
+        # Update count to track what we've added
+        messages_added_count = len(model_input.messages)
 
         # Check if we have a terminal state (game over)
         if model_input.terminal_state is not None:
