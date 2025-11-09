@@ -148,24 +148,12 @@ def api_state(game_id: str) -> Dict[str, Any]:
                 card_event = _serialize_event(ev)
                 card_event["event_type"] = "president-draw-cards"
                 card_event["agent_id"] = agent_id
-                
-                # Use the extra card ID data if available
-                if hasattr(ev, '__dict__') and '_cards_with_ids' in ev.__dict__:
-                    card_event["cards_drawn"] = ev.__dict__["_cards_with_ids"]
-                    card_event["card_discarded"] = ev.__dict__["_discarded_card_id"]
-                
                 events.append(card_event)
             # Add chancellor card receive events  
             elif hasattr(ev, 'cards_received') and hasattr(ev, 'card_discarded'):
                 card_event = _serialize_event(ev)
                 card_event["event_type"] = "chancellor-receive-cards"
                 card_event["agent_id"] = agent_id
-                
-                # Use the extra card ID data if available
-                if hasattr(ev, '__dict__') and '_cards_with_ids' in ev.__dict__:
-                    card_event["cards_received"] = ev.__dict__["_cards_with_ids"]
-                    card_event["card_discarded"] = ev.__dict__["_discarded_card_id"]
-                
                 events.append(card_event)
     
     # Sort events by order counter to maintain chronological order
@@ -227,8 +215,8 @@ def api_state(game_id: str) -> Dict[str, Any]:
         "game_id": actual_game_id,
         "liberal_policies": engine.liberal_policies_played,
         "fascist_policies": engine.fascist_policies_played,
-        "liberal_policies_to_win": 5,
-        "fascist_policies_to_win": 6,
+        "liberal_policies_to_win": engine.liberal_policies_to_win,
+        "fascist_policies_to_win": engine.fascist_policies_to_win,
         "events": events,
         "players": players,
     }

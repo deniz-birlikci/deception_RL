@@ -27,7 +27,7 @@ class EngineAPI:
         game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
-        fascist_policies_to_win: int = 3,
+        fascist_policies_to_win: int = 4,
         liberal_policies_to_win: int = 3,
         log_file: str | None = None,
     ) -> ModelInput:
