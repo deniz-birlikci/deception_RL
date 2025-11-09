@@ -184,56 +184,75 @@ class Engine:
             self.current_chancellor_id = chancellor_id
             await self._log_state_to_file()
 
-            cards = self.deck.draw(3)
+            cards_raw = self.deck.draw(3)
+            # Assign unique IDs to each card for tracking (frontend use only)
+            cards_with_ids = [
+                {"id": f"card_{self.event_counter}_{i}", "type": card}
+                for i, card in enumerate(cards_raw)
+            ]
+            
             tool = cast(
                 PresidentChooseCardToDiscardTool,
                 await self._get_tool(
                     president_id,
-                    f"Cards: {cards}. Discard index (0-2).",
+                    f"Cards: {cards_raw}. Discard index (0-2).",
                     input_queue,
                     output_queue,
                     allowed_tools=["president-choose-card-to-discard"],
                 ),
             )
             idx = tool.card_index
-            discarded = cards.pop(idx)
-            self.deck.add_to_discard(discarded)
+            discarded_card = cards_with_ids.pop(idx)
+            self.deck.add_to_discard(discarded_card["type"])
 
-            self.private_events_by_agent[president_id].append(
-                PresidentChooseCardToDiscardEventPrivate(
-                    event_order_counter=self.event_counter,
-                    president_id=president_id,
-                    cards_drawn=cards + [discarded],
-                    card_discarded=discarded,
-                )
+            # Reconstruct cards_drawn with discarded card at original position
+            all_cards_with_ids = cards_with_ids[:idx] + [discarded_card] + cards_with_ids[idx:]
+            
+            # Create the event with simple card types for the model
+            event = PresidentChooseCardToDiscardEventPrivate(
+                event_order_counter=self.event_counter,
+                president_id=president_id,
+                cards_drawn=[c["type"] for c in all_cards_with_ids],
+                card_discarded=discarded_card["type"],
             )
+            # Attach card ID data as extra attribute for frontend serialization
+            event.__dict__["_cards_with_ids"] = all_cards_with_ids
+            event.__dict__["_discarded_card_id"] = discarded_card["id"]
+            self.private_events_by_agent[president_id].append(event)
             self.event_counter += 1
             await self._log_state_to_file()
 
+            # cards_with_ids now contains the 2 cards passed to chancellor
+            cards_types = [c["type"] for c in cards_with_ids]
+            
             tool = cast(
                 ChancellorPlayPolicyTool,
                 await self._get_tool(
                     chancellor_id,
-                    f"Cards: {cards}. Play index (0-1).",
+                    f"Cards: {cards_types}. Play index (0-1).",
                     input_queue,
                     output_queue,
                     allowed_tools=["chancellor-play-policy"],
                 ),
             )
             idx = tool.card_index
-            played = cards[idx]
-            discarded_by_chancellor = cards[1 - idx]
-            self.deck.add_to_discard(discarded_by_chancellor)
+            played_card = cards_with_ids[idx]
+            discarded_by_chancellor_card = cards_with_ids[1 - idx]
+            played = played_card["type"]
+            self.deck.add_to_discard(discarded_by_chancellor_card["type"])
 
-            self.private_events_by_agent[chancellor_id].append(
-                ChancellorReceivePoliciesEventPrivate(
-                    event_order_counter=self.event_counter,
-                    chancellor_id=chancellor_id,
-                    president_id_received_from=president_id,
-                    cards_received=cards,
-                    card_discarded=discarded_by_chancellor,
-                )
+            # Create the event with simple card types for the model
+            event = ChancellorReceivePoliciesEventPrivate(
+                event_order_counter=self.event_counter,
+                chancellor_id=chancellor_id,
+                president_id_received_from=president_id,
+                cards_received=[c["type"] for c in cards_with_ids],
+                card_discarded=discarded_by_chancellor_card["type"],
             )
+            # Attach card ID data as extra attribute for frontend serialization
+            event.__dict__["_cards_with_ids"] = cards_with_ids
+            event.__dict__["_discarded_card_id"] = discarded_by_chancellor_card["id"]
+            self.private_events_by_agent[chancellor_id].append(event)
             self.event_counter += 1
             self.public_events.append(
                 ChancellorPlayPolicyEventPublic(

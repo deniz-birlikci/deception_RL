@@ -4,6 +4,31 @@
  - Right column: policy tracks (liberal/fascist)
 */
 
+// === add near other globals (top of app.js) ===
+let LAST_CARD_ROUND_KEY = null;
+
+function latestRoundKey(events = []) {
+  // pick the most recent round-advancing event index (prevents flicker)
+  for (let i = events.length - 1; i >= 0; i--) {
+    const t = events[i].event_type;
+    if (t === "president-draw-cards" ||
+        t === "chancellor-receive-cards" ||
+        t === "chancellor-play-policy" ||
+        t === "president-pick-chancellor") return i;
+  }
+  return events.length;
+}
+
+function norm(x){ return (x ?? "").toString().toLowerCase().trim(); }
+
+// consume-once type matcher so we don't “discard” two of the same type
+function makeTypeDiscarder(discardType){
+  let remaining = 1;
+  const t = norm(discardType);
+  return (cardType) => (remaining && norm(cardType) === t) ? (remaining--, true) : false;
+}
+
+
 const API = {
   base: "http://localhost:8000/api",
   async createGame() {
@@ -400,181 +425,187 @@ function renderChat(events, players) {
   }
 }
 
-function renderCardSelection(gameState) {
-  console.log("🎴 CARD SELECTION: Function called!");
-  console.log("🎴 CARD SELECTION: GameState events length:", gameState?.events?.length || 0);
+// Helper function to normalize card types from backend
+function normalizeCardType(cardType) {
+  if (!cardType) return cardType;
+  const normalized = cardType.toLowerCase().trim();
   
+  // Handle abbreviated formats
+  if (normalized === 'f' || normalized === 'ff' || normalized.startsWith('fasc')) {
+    return 'fascist';
+  }
+  if (normalized === 'l' || normalized === 'll' || normalized.startsWith('lib')) {
+    return 'liberal';
+  }
+  
+  return normalized; // Return as-is if already normalized
+}
+
+// === replace your entire renderCardSelection with this ===
+function renderCardSelection(gameState) {
   const presidentCards = document.getElementById("president-cards");
   const chancellorCards = document.getElementById("chancellor-cards");
-  
-  if (!presidentCards || !chancellorCards) {
-    console.warn("Card selection elements not found in DOM");
-    return;
-  }
-  
-  // Clear existing cards
+  if (!presidentCards || !chancellorCards) return;
+
+  // prevent mid-poll flicker: only re-render when round changes
+  const roundKey = latestRoundKey(gameState?.events || []);
+  if (roundKey === LAST_CARD_ROUND_KEY &&
+      presidentCards.childElementCount &&
+      chancellorCards.childElementCount) return;
+  LAST_CARD_ROUND_KEY = roundKey;
+
+  // clear
   presidentCards.innerHTML = "";
   chancellorCards.innerHTML = "";
-  
-  console.log("DEBUG: Rendering card selection, checking events...");
-  console.log("DEBUG: Total events:", gameState?.events?.length || 0);
-  
-  // Find the most recent president/chancellor card events
+
+  // ---- prefer structured events; fall back to text parsing ----
   let presidentEvent = null;
   let chancellorEvent = null;
-  
-  if (gameState && gameState.events) {
-    console.log("DEBUG: Searching through events for card messages...");
-    // Search backwards for the most recent events
+
+  if (gameState?.events) {
+    // newest → oldest
     for (let i = gameState.events.length - 1; i >= 0; i--) {
-      const event = gameState.events[i];
-      
-      // Debug: log each event we're checking
-      if (event.question_or_statement) {
-        console.log(`DEBUG: Checking event ${i}: "${event.question_or_statement.substring(0, 50)}..."`);
+      const ev = gameState.events[i];
+
+      if (!presidentEvent && ev.event_type === "president-draw-cards") {
+        presidentEvent = {
+          cards_drawn: ev.cards_drawn || [],
+          card_discarded: ev.card_discarded
+        };
       }
-      
-      // Look for president card draw messages: "You drew 3 cards: [LIBERAL, FASCIST, FASCIST] and discarded FASCIST"
-      if (!presidentEvent && event.question_or_statement && event.question_or_statement.includes("You drew 3 cards:")) {
-        const text = event.question_or_statement;
-        const cardsMatch = text.match(/\[(.*?)\]/);
-        const discardedMatch = text.match(/discarded (\w+)/);
-        
-        if (cardsMatch && discardedMatch) {
-          presidentEvent = {
-            cards_drawn: cardsMatch[1].split(', ').map(card => card.toLowerCase()),
-            card_discarded: discardedMatch[1].toLowerCase()
-          };
-          console.log("DEBUG: Found president event:", presidentEvent);
-        }
+      if (!chancellorEvent && ev.event_type === "chancellor-receive-cards") {
+        chancellorEvent = {
+          cards_received: ev.cards_received || [],
+          card_discarded: ev.card_discarded,
+          card_played: ev.card_played
+        };
       }
-      
-      // Look for chancellor card receive messages: "You received 2 cards from President agent_2: [FASCIST, LIBERAL] and discarded FASCIST"
-      if (!chancellorEvent && event.question_or_statement && event.question_or_statement.includes("You received 2 cards from President")) {
-        const text = event.question_or_statement;
-        const cardsMatch = text.match(/\[(.*?)\]/);
-        const discardedMatch = text.match(/discarded (\w+)/);
-        
-        if (cardsMatch && discardedMatch) {
-          chancellorEvent = {
-            cards_received: cardsMatch[1].split(', ').map(card => card.toLowerCase()),
-            card_discarded: discardedMatch[1].toLowerCase()
-          };
-          console.log("DEBUG: Found chancellor event:", chancellorEvent);
-        }
-      }
-      
       if (presidentEvent && chancellorEvent) break;
     }
-  } else {
-    console.log("DEBUG: No gameState or events available");
+
+    // text fallbacks
+    for (let i = gameState.events.length - 1; i >= 0 && (!presidentEvent || !chancellorEvent); i--) {
+      const e = gameState.events[i];
+      const t = e.question_or_statement || "";
+
+      if (!presidentEvent) {
+        if (t.includes("You drew 3 cards:")) {
+          const cards = (t.match(/\[(.*?)\]/)?.[1] || "").split(", ").map(s => s.toLowerCase());
+          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").toLowerCase();
+          if (cards.length) presidentEvent = { cards_drawn: cards, card_discarded: disc };
+        } else if (t.includes("I drew") && t.includes("discarded")) {
+          const drew = (t.match(/I drew ([LF-]+)/)?.[1] || "")
+            .split("-").map(c => c === "L" ? "liberal" : "fascist");
+          const disc = (t.match(/discarded ([LF])/)?.[1] === "L") ? "liberal" : "fascist";
+          if (drew.length) presidentEvent = { cards_drawn: drew, card_discarded: disc };
+        }
+      }
+
+      if (!chancellorEvent) {
+        if (t.includes("You received 2 cards from President")) {
+          const cards = (t.match(/\[(.*?)\]/)?.[1] || "").split(", ").map(s => s.toLowerCase());
+          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").toLowerCase();
+          if (cards.length) chancellorEvent = { cards_received: cards, card_discarded: disc };
+        } else if (t.includes("I received") && t.includes("discarded")) {
+          const rec  = (t.match(/I received ([LF-]+)/)?.[1] || "")
+            .split("-").map(c => c === "L" ? "liberal" : "fascist");
+          const disc = (t.match(/discarded ([LF])/)?.[1] === "L") ? "liberal" : "fascist";
+          if (rec.length) chancellorEvent = { cards_received: rec, card_discarded: disc };
+        }
+      }
+    }
   }
-  
-  console.log("DEBUG: Final results - presidentEvent:", presidentEvent);
-  console.log("DEBUG: Final results - chancellorEvent:", chancellorEvent);
-  
-  // Render President's cards (3 drawn, 1 discarded)
-  if (presidentEvent && presidentEvent.cards_drawn) {
-    console.log("DEBUG: Rendering president cards:", presidentEvent.cards_drawn);
-    presidentEvent.cards_drawn.forEach((cardType, index) => {
-      const cardEl = el("div", "policy-card");
-      cardEl.classList.add(cardType); // 'liberal' or 'fascist'
-      cardEl.textContent = cardType.toUpperCase();
-      
-      // Basic styling
-      cardEl.style.padding = "8px 12px";
-      cardEl.style.margin = "2px";
-      cardEl.style.border = "2px solid #333";
-      cardEl.style.borderRadius = "4px";
-      cardEl.style.fontSize = "12px";
-      cardEl.style.fontWeight = "bold";
-      
-      if (cardType === 'liberal') {
-        cardEl.style.backgroundColor = "#4CAF50";
-        cardEl.style.color = "white";
-      } else {
-        cardEl.style.backgroundColor = "#f44336";
-        cardEl.style.color = "white";
-      }
-      
-      // Mark the discarded card as faded
-      if (cardType === presidentEvent.card_discarded) {
+
+  // ---------- PRESIDENT: draw 3, discard 1 ----------
+  if (presidentEvent?.cards_drawn?.length) {
+    const hasIds = presidentEvent.cards_drawn.some(c => typeof c !== "string" && c?.id);
+    const typeDiscarder = !hasIds && presidentEvent.card_discarded
+      ? makeTypeDiscarder(presidentEvent.card_discarded) : null;
+
+    presidentEvent.cards_drawn.forEach(card => {
+      const type = typeof card === "string" ? card : card?.type;
+      const id   = typeof card === "string" ? null : card?.id;
+
+      const cardEl = document.createElement("div");
+      cardEl.className = "policy-card " + norm(type);
+
+      // ID first; else consume-by-type once
+      const discardedById   = id && presidentEvent.card_discarded === id;
+      const discardedByType = !discardedById && typeDiscarder ? typeDiscarder(type) : false;
+      const isDiscarded = discardedById || discardedByType;
+
+      if (isDiscarded) {
         cardEl.classList.add("discarded");
-        cardEl.style.opacity = "0.5";
-        cardEl.style.textDecoration = "line-through";
+        cardEl.style.opacity = "0.4";
+        cardEl.style.filter = "grayscale(70%)";
+      } else {
+        cardEl.classList.add("passed");
+        cardEl.style.filter = "brightness(1.2)";
+        cardEl.style.boxShadow = "0 0 10px rgba(34,197,94,.6)";
       }
-      
       presidentCards.appendChild(cardEl);
     });
   } else {
-    console.log("DEBUG: No president event found, showing placeholders");
-    // Show placeholder cards for President (3 cards)
     for (let i = 0; i < 3; i++) {
-      const placeholder = el("div", "card-placeholder");
-      placeholder.textContent = i + 1;
-      placeholder.style.padding = "8px 12px";
-      placeholder.style.margin = "2px";
-      placeholder.style.border = "2px dashed #666";
-      placeholder.style.borderRadius = "4px";
-      placeholder.style.backgroundColor = "transparent";
-      placeholder.style.color = "#999";
-      presidentCards.appendChild(placeholder);
+      const ph = document.createElement("div");
+      ph.className = "card-placeholder"; ph.textContent = i + 1;
+      presidentCards.appendChild(ph);
     }
   }
-  
-  // Render Chancellor's cards (2 received, 1 discarded/played)
-  if (chancellorEvent && chancellorEvent.cards_received) {
-    console.log("DEBUG: Rendering chancellor cards:", chancellorEvent.cards_received);
-    chancellorEvent.cards_received.forEach((cardType, index) => {
-      const cardEl = el("div", "policy-card");
-      cardEl.classList.add(cardType); // 'liberal' or 'fascist'
-      cardEl.textContent = cardType.toUpperCase();
-      
-      // Basic styling
-      cardEl.style.padding = "8px 12px";
-      cardEl.style.margin = "2px";
-      cardEl.style.border = "2px solid #333";
-      cardEl.style.borderRadius = "4px";
-      cardEl.style.fontSize = "12px";
-      cardEl.style.fontWeight = "bold";
-      
-      if (cardType === 'liberal') {
-        cardEl.style.backgroundColor = "#4CAF50";
-        cardEl.style.color = "white";
-      } else {
-        cardEl.style.backgroundColor = "#f44336";
-        cardEl.style.color = "white";
-      }
-      
-      // Mark the card that was NOT discarded as played (the one that was enacted)
-      if (cardType !== chancellorEvent.card_discarded) {
-        cardEl.classList.add("played");
-        cardEl.style.border = "3px solid gold";
-        cardEl.style.boxShadow = "0 0 8px rgba(255, 215, 0, 0.6)";
-      } else {
-        cardEl.classList.add("discarded");
-        cardEl.style.opacity = "0.5";
-        cardEl.style.textDecoration = "line-through";
-      }
-      
-      chancellorCards.appendChild(cardEl);
-    });
-  } else {
-    console.log("DEBUG: No chancellor event found, showing placeholders");
-    // Show placeholder cards for Chancellor (2 cards)
+
+  // ---------- CHANCELLOR: receive 2, play 1 ----------
+  if (chancellorEvent?.cards_received?.length) {
+    const cards = chancellorEvent.cards_received.slice(0, 2);
+
+    // decide exactly one discarded & one played
+    let discardIndex = -1;
+
+    // prefer ID
+    if (chancellorEvent.card_discarded) {
+      discardIndex = cards.findIndex(c =>
+        (typeof c !== "string" && c?.id === chancellorEvent.card_discarded));
+    }
+    // fallback: consume-by-type once
+    if (discardIndex === -1 && chancellorEvent.card_discarded) {
+      const consume = makeTypeDiscarder(chancellorEvent.card_discarded);
+      discardIndex = cards.findIndex(c => consume(typeof c === "string" ? c : c?.type));
+    }
+    if (discardIndex === -1) discardIndex = 0; // safest default
+    const playedIndex = discardIndex === 0 ? 1 : 0;
+
     for (let i = 0; i < 2; i++) {
-      const placeholder = el("div", "card-placeholder");
-      placeholder.textContent = i + 1;
-      placeholder.style.padding = "8px 12px";
-      placeholder.style.margin = "2px";
-      placeholder.style.border = "2px dashed #666";
-      placeholder.style.borderRadius = "4px";
-      placeholder.style.backgroundColor = "transparent";
-      placeholder.style.color = "#999";
-      chancellorCards.appendChild(placeholder);
+      const c = cards[i];
+      if (c) {
+        const type = typeof c === "string" ? c : c?.type;
+        const elDiv = document.createElement("div");
+        elDiv.className = "policy-card " + norm(type);
+
+        if (i === discardIndex) {
+          elDiv.classList.add("discarded");
+          elDiv.style.opacity = "0.4";
+          elDiv.style.filter = "grayscale(70%)";
+        } else if (i === playedIndex) {
+          elDiv.classList.add("played");
+          elDiv.style.border = "4px solid #fbbf24";
+          elDiv.style.boxShadow = "0 0 15px rgba(251,191,36,.8)";
+          elDiv.style.transform = "scale(1.05)";
+        }
+        chancellorCards.appendChild(elDiv);
+      } else {
+        const ph = document.createElement("div");
+        ph.className = "card-placeholder"; ph.textContent = i + 1;
+        chancellorCards.appendChild(ph);
+      }
+    }
+  } else {
+    for (let i = 0; i < 2; i++) {
+      const ph = document.createElement("div");
+      ph.className = "card-placeholder"; ph.textContent = i + 1;
+      chancellorCards.appendChild(ph);
     }
   }
 }
+
 
 function renderTracks(gameState) {
   const libRoot = $("#liberal-track");
@@ -723,14 +754,17 @@ function startRealtimePolling() {
 }
 
 function installControls() {
+  console.log("🎮 Installing controls...");
   // Lightweight toolbar injected into the header
   const header = document.querySelector(".app-header");
+  console.log("🎮 Header element found:", header);
   const toolbar = el("div");
   toolbar.style.display = "flex";
   toolbar.style.gap = "8px";
 
   const startBtn = el("button", null, "Start Game");
   startBtn.className = "game-button";
+  console.log("🎮 Created Start Game button:", startBtn);
   startBtn.onclick = async () => {
     if (!GAME_ID) return;
     try {
@@ -760,6 +794,7 @@ function installControls() {
 
   toolbar.append(startBtn);
   header.appendChild(toolbar);
+  console.log("🎮 Button added to header! Toolbar:", toolbar);
 }
 
 async function main() {

@@ -140,6 +140,37 @@ def api_state(game_id: str) -> Dict[str, Any]:
     # Get public events from engine
     events = [_serialize_event(ev) for ev in engine.public_events]
     
+    # Also add card-related private events for UI display
+    for agent_id, private_events in engine.private_events_by_agent.items():
+        for ev in private_events:
+            # Add president card draw events
+            if hasattr(ev, 'cards_drawn') and hasattr(ev, 'card_discarded'):
+                card_event = _serialize_event(ev)
+                card_event["event_type"] = "president-draw-cards"
+                card_event["agent_id"] = agent_id
+                
+                # Use the extra card ID data if available
+                if hasattr(ev, '__dict__') and '_cards_with_ids' in ev.__dict__:
+                    card_event["cards_drawn"] = ev.__dict__["_cards_with_ids"]
+                    card_event["card_discarded"] = ev.__dict__["_discarded_card_id"]
+                
+                events.append(card_event)
+            # Add chancellor card receive events  
+            elif hasattr(ev, 'cards_received') and hasattr(ev, 'card_discarded'):
+                card_event = _serialize_event(ev)
+                card_event["event_type"] = "chancellor-receive-cards"
+                card_event["agent_id"] = agent_id
+                
+                # Use the extra card ID data if available
+                if hasattr(ev, '__dict__') and '_cards_with_ids' in ev.__dict__:
+                    card_event["cards_received"] = ev.__dict__["_cards_with_ids"]
+                    card_event["card_discarded"] = ev.__dict__["_discarded_card_id"]
+                
+                events.append(card_event)
+    
+    # Sort events by order counter to maintain chronological order
+    events.sort(key=lambda e: e.get('event_order_counter', 0))
+    
     # Find the most recent chancellor from events (since engine state might be cleared)
     most_recent_chancellor = None
     for event in reversed(engine.public_events):
@@ -151,13 +182,30 @@ def api_state(game_id: str) -> Dict[str, Any]:
     print(f"DEBUG: Most recent chancellor from events: {most_recent_chancellor}")
     
     # Create player info
-    names = ["Alice", "Bob", "Charlie", "Diana", "Eve"]
+    names = ["Pearl", "Rajan", "Charlie", "Ryland", "Deniz"]
     players = []
     
     for i, (agent_id, agent) in enumerate(engine.agents_by_id.items()):
         is_president = agent_id == engine.president_rotation[engine.current_president_idx]
-        # Use most recent chancellor from events if engine state is None
-        is_chancellor = agent_id == (engine.current_chancellor_id or most_recent_chancellor)
+        
+        # Only show chancellor if there's an active chancellor AND they're not the same as president
+        current_chancellor = engine.current_chancellor_id or most_recent_chancellor
+        is_chancellor = (current_chancellor and 
+                        agent_id == current_chancellor and 
+                        agent_id != engine.president_rotation[engine.current_president_idx])
+        
+        # Additional check: if we're in nomination phase (no current chancellor), clear chancellor titles
+        if not engine.current_chancellor_id:
+            # Check if we're in a new round by looking for recent president-pick-chancellor events
+            recent_nomination = False
+            for event in reversed(engine.public_events[-3:]):  # Check last 3 events
+                if hasattr(event, 'president_id') and hasattr(event, 'chancellor_id'):
+                    # If there's a recent nomination, we're in transition
+                    recent_nomination = True
+                    break
+            
+            if recent_nomination:
+                is_chancellor = False  # Clear chancellor during nomination phase
         
         print(f"DEBUG: Agent {agent_id} - President: {is_president}, Chancellor: {is_chancellor}")
         
