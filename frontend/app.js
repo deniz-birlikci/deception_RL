@@ -7,13 +7,27 @@
 const API = {
   base: "http://localhost:8000/api",
   async createGame() {
-    const res = await fetch(`${this.base}/create`, { method: "POST" });
-    const data = await res.json();
-    if (!data.game_id) throw new Error("Failed to create game");
-    return data.game_id;
+    try {
+      const res = await fetch(`${this.base}/create`, { method: "POST" });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      const data = await res.json();
+      if (!data.game_id) throw new Error("Failed to create game - no game_id in response");
+      return data.game_id;
+    } catch (error) {
+      console.error("CreateGame error:", error);
+      throw error;
+    }
+  },
+  async startGame(gameId) {
+    const res = await fetch(`${this.base}/${gameId}/start`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
   },
   async discussion(gameId) {
     const res = await fetch(`${this.base}/${gameId}/discussion`, { method: "POST" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
   },
   async state(gameId) {
@@ -54,11 +68,18 @@ function renderPlayers(players) {
     const card = el("div", "player-card");
     
     // Add special styling for "You" player
-    if (player.is_you) {
+    if (player.is_you || player.model === null) {
       card.classList.add("you-player");
     }
     
-    const nameEl = el("div", "player-name", player.name);
+    // Add eliminated styling
+    if (player.eliminated || player.is_eliminated) {
+      card.classList.add("eliminated");
+    }
+    
+    // Add (You) if model is None or is_you is true
+    const displayName = (player.model === null || player.is_you) ? `${player.name} (You)` : player.name;
+    const nameEl = el("div", "player-name", displayName);
     const roleEl = el("div", "player-role", player.role);
     const titleEl = el("div", "player-title", player.title);
     
@@ -95,8 +116,6 @@ function renderChat(events, players) {
     playerLookup[p.id] = p;
   });
 
-  console.log("Player lookup:", playerLookup); // Debug log
-  console.log("Events to render:", events); // Debug log
 
   (events || []).forEach((ev) => {
     const kind = ev.event_type || "event";
@@ -104,7 +123,7 @@ function renderChat(events, players) {
     // Left side: table discussion
     if (kind === "ask-to-speak" && ev.question_or_statement) {
       const player = playerLookup[ev.agent_id];
-      const isYou = player?.is_you;
+      const isYou = player?.is_you || player?.model === null;
       const bubbleClass = isYou ? "chat-item you" : "chat-item speaker";
       
       // Replace @targeted and all agent IDs with actual names
@@ -118,14 +137,23 @@ function renderChat(events, players) {
       
       // Replace all agent IDs with player names
       Object.keys(playerLookup).forEach(agentId => {
-        const playerName = playerLookup[agentId]?.name;
+        const player = playerLookup[agentId];
+        const playerName = player?.name;
         if (playerName && statement.includes(agentId)) {
-          // Replace the full UUID with the player name
-          statement = statement.replace(new RegExp(agentId, 'g'), playerName);
+          // Replace the full UUID with the player name, escaping special regex chars
+          const escapedId = agentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          statement = statement.replace(new RegExp(escapedId, 'gi'), playerName);
         }
       });
       
-      const playerName = player?.name || ev.agent_id;
+      // Additional pass to catch any remaining UUID patterns
+      const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+      statement = statement.replace(uuidPattern, (match) => {
+        const player = playerLookup[match] || playerLookup[match.toLowerCase()] || playerLookup[match.toUpperCase()];
+        return player?.name || match; // Keep original if no name found
+      });
+      
+      const playerName = (player?.model === null || player?.is_you) ? `${player?.name || ev.agent_id} (You)` : (player?.name || ev.agent_id);
       const targetInfo = ev.ask_directed_question_to_agent_id 
         ? ` → @${playerLookup[ev.ask_directed_question_to_agent_id]?.name || "Unknown"}`
         : "";
@@ -136,7 +164,9 @@ function renderChat(events, players) {
       bubble.textContent = statement;
       
       // Add role-based color to chat metadata
-      if (player?.role?.includes("Liberal")) {
+      if (player?.eliminated || player?.is_eliminated) {
+        meta.classList.add("eliminated");
+      } else if (player?.role?.includes("Liberal")) {
         meta.classList.add("liberal");
       } else if (player?.role?.includes("Fascist")) {
         if (player.name === "Hitler") {
@@ -155,19 +185,29 @@ function renderChat(events, players) {
     if (kind === "answer") {
       const player = playerLookup[ev.agent_id];
       const targetPlayer = playerLookup[ev.in_response_to_agent_id];
-      const isYou = player?.is_you;
+      const isYou = player?.is_you || player?.model === null;
       const bubbleClass = isYou ? "chat-item you" : "chat-item answer";
       
       // Replace all agent IDs with player names in response text
       let response = ev.response;
       Object.keys(playerLookup).forEach(agentId => {
-        const playerName = playerLookup[agentId]?.name;
+        const player = playerLookup[agentId];
+        const playerName = player?.name;
         if (playerName && response.includes(agentId)) {
-          response = response.replace(new RegExp(agentId, 'g'), playerName);
+          // Replace the full UUID with the player name, escaping special regex chars
+          const escapedId = agentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          response = response.replace(new RegExp(escapedId, 'g'), playerName);
         }
       });
       
-      const playerName = player?.name || ev.agent_id;
+      // Additional pass to catch any remaining UUID patterns
+      const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+      response = response.replace(uuidPattern, (match) => {
+        const player = playerLookup[match];
+        return player?.name || match; // Keep original if no name found
+      });
+      
+      const playerName = (player?.model === null || player?.is_you) ? `${player?.name || ev.agent_id} (You)` : (player?.name || ev.agent_id);
       const targetName = targetPlayer?.name || ev.in_response_to_agent_id;
       
       const messageContainer = el("div", "message-container");
@@ -176,7 +216,9 @@ function renderChat(events, players) {
       bubble.textContent = response;
       
       // Add role-based color to chat metadata
-      if (player?.role?.includes("Liberal")) {
+      if (player?.eliminated || player?.is_eliminated) {
+        meta.classList.add("eliminated");
+      } else if (player?.role?.includes("Liberal")) {
         meta.classList.add("liberal");
       } else if (player?.role?.includes("Fascist")) {
         if (player.name === "Hitler") {
@@ -237,13 +279,16 @@ function renderChat(events, players) {
   });
 
   // Auto scroll to bottom only if user is already at the bottom
-  const isAtBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 5; // 5px tolerance
+  const isAtBottom = root.scrollTop + root.clientHeight >= root.scrollHeight - 10; // 10px tolerance
   if (isAtBottom) {
-    root.scrollTop = root.scrollHeight;
+    // Use requestAnimationFrame to ensure DOM is updated before scrolling
+    requestAnimationFrame(() => {
+      root.scrollTop = root.scrollHeight;
+    });
   }
 }
 
-function renderCardSelection(cardData) {
+function renderCardSelection(gameState) {
   const presidentCards = document.getElementById("president-cards");
   const chancellorCards = document.getElementById("chancellor-cards");
   
@@ -251,56 +296,115 @@ function renderCardSelection(cardData) {
   presidentCards.innerHTML = "";
   chancellorCards.innerHTML = "";
   
-  if (!cardData) return;
+  // Find the most recent president/chancellor card events
+  let presidentEvent = null;
+  let chancellorEvent = null;
+  
+  if (gameState && gameState.events) {
+    // Search backwards for the most recent events
+    for (let i = gameState.events.length - 1; i >= 0; i--) {
+      const event = gameState.events[i];
+      if (!presidentEvent && event.cards_drawn) {
+        presidentEvent = event;
+      }
+      if (!chancellorEvent && event.cards_received) {
+        chancellorEvent = event;
+      }
+      if (presidentEvent && chancellorEvent) break;
+    }
+  }
   
   // Render President's cards (3 drawn, 1 discarded)
-  if (cardData.presidentDraw) {
-    cardData.presidentDraw.forEach((card, index) => {
+  if (presidentEvent && presidentEvent.cards_drawn) {
+    presidentEvent.cards_drawn.forEach((cardType, index) => {
       const cardEl = el("div", "policy-card");
-      cardEl.classList.add(card.type); // 'liberal' or 'fascist'
+      cardEl.classList.add(cardType); // 'liberal' or 'fascist'
       
-      if (card.discarded) {
+      // Mark the discarded card as faded
+      if (cardType === presidentEvent.card_discarded) {
         cardEl.classList.add("discarded");
       }
       
       presidentCards.appendChild(cardEl);
     });
+  } else {
+    // Show placeholder cards for President (3 cards)
+    for (let i = 0; i < 3; i++) {
+      const placeholder = el("div", "card-placeholder");
+      placeholder.textContent = i + 1;
+      presidentCards.appendChild(placeholder);
+    }
   }
   
-  // Render Chancellor's cards (2 received, 1 played)
-  if (cardData.chancellorReceive) {
-    cardData.chancellorReceive.forEach((card, index) => {
+  // Render Chancellor's cards (2 received, 1 discarded/played)
+  if (chancellorEvent && chancellorEvent.cards_received) {
+    chancellorEvent.cards_received.forEach((cardType, index) => {
       const cardEl = el("div", "policy-card");
-      cardEl.classList.add(card.type); // 'liberal' or 'fascist'
+      cardEl.classList.add(cardType); // 'liberal' or 'fascist'
       
-      if (card.played) {
+      // Mark the card that was NOT discarded as played (the one that was enacted)
+      if (cardType !== chancellorEvent.card_discarded) {
         cardEl.classList.add("played");
+      } else {
+        cardEl.classList.add("discarded");
       }
       
       chancellorCards.appendChild(cardEl);
     });
+  } else {
+    // Show placeholder cards for Chancellor (2 cards)
+    for (let i = 0; i < 2; i++) {
+      const placeholder = el("div", "card-placeholder");
+      placeholder.textContent = i + 1;
+      chancellorCards.appendChild(placeholder);
+    }
   }
 }
 
-function renderTracks({ liberal, fascist, liberalSlotsTotal, fascistSlotsTotal }) {
+function renderTracks(gameState) {
   const libRoot = $("#liberal-track");
   const fasRoot = $("#fascist-track");
   libRoot.classList.add("track", "liberal");
   fasRoot.classList.add("track", "fascist");
 
+  // Count policies played from events
+  let liberalPolicies = 0;
+  let fascistPolicies = 0;
+  
+  if (gameState.events) {
+    gameState.events.forEach(event => {
+      if (event.event_type === "chancellor-play-policy" || event.card_played) {
+        if (event.card_played === "liberal") {
+          liberalPolicies++;
+        } else if (event.card_played === "fascist") {
+          fascistPolicies++;
+        }
+      }
+    });
+  }
+
   // Use backend values or fallback to defaults
-  const LIBERAL_SLOTS = liberalSlotsTotal || 5;
-  const FASCIST_SLOTS = fascistSlotsTotal || 6;
+  const LIBERAL_SLOTS = gameState.liberal_policies_to_win || 5;
+  const FASCIST_SLOTS = gameState.fascist_policies_to_win || 6;
 
   libRoot.innerHTML = "";
   fasRoot.innerHTML = "";
 
+  // Render Liberal track
   for (let i = 0; i < LIBERAL_SLOTS; i++) {
-    const slot = el("div", "slot" + (i < liberal ? " filled" : ""));
+    const slot = el("div", "slot" + (i < liberalPolicies ? " filled" : ""));
+    if (i >= liberalPolicies) {
+      slot.textContent = i + 1; // Show slot numbers for empty slots
+    }
     libRoot.appendChild(slot);
   }
+  
+  // Render Fascist track
   for (let i = 0; i < FASCIST_SLOTS; i++) {
-    const slot = el("div", "slot" + (i < fascist ? " filled" : ""));
+    const slot = el("div", "slot" + (i < fascistPolicies ? " filled" : ""));
+    if (i >= fascistPolicies) {
+      slot.textContent = i + 1; // Show slot numbers for empty slots
+    }
     fasRoot.appendChild(slot);
   }
 }
@@ -311,15 +415,18 @@ async function refreshState() {
     const state = await API.state(GAME_ID);
     if (!state.ok) throw new Error(state.error || "State error");
 
+    console.log("State received:", {
+      eventCount: state.events?.length || 0,
+      playerCount: state.players?.length || 0,
+      liberal: state.liberal_policies,
+      fascist: state.fascist_policies
+    });
+
     setStatus({ tick: true });
     renderPlayers(state.players);
     renderChat(state.events, state.players);
-    renderTracks({ 
-      liberal: state.liberal_policies, 
-      fascist: state.fascist_policies,
-      liberalSlotsTotal: state.liberal_policies_to_win,
-      fascistSlotsTotal: state.fascist_policies_to_win
-    });
+    renderTracks(state);
+    renderCardSelection(state); // Pass full state to show card selection
     
     // Update event count for real-time polling
     LAST_EVENT_COUNT = (state.events || []).length;
@@ -377,26 +484,22 @@ function installControls() {
   startBtn.onclick = async () => {
     if (!GAME_ID) return;
     try {
-      startBtn.textContent = "Running...";
+      startBtn.textContent = "Game Running...";
       startBtn.disabled = true;
       
-      console.log("Starting discussion round...");
-      const start = Date.now();
+      console.log("Starting full game...");
       
-      // Start the discussion round (non-blocking)
-      API.discussion(GAME_ID).then(() => {
-        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-        console.log(`Discussion round completed in ${elapsed}s`);
+      // Start the entire game in background
+      const result = await API.startGame(GAME_ID);
+      if (result.ok) {
+        console.log("Game started successfully! Watch updates in real-time.");
+        // Start polling for updates immediately
+        startRealtimePolling();
+      } else {
+        console.error("Failed to start game:", result.error);
         startBtn.textContent = "Start Game";
         startBtn.disabled = false;
-      }).catch(e => {
-        console.error(e);
-        startBtn.textContent = "Start Game";
-        startBtn.disabled = false;
-      });
-      
-      // Start polling for new messages immediately
-      startRealtimePolling();
+      }
       
     } catch (e) { 
       console.error(e);

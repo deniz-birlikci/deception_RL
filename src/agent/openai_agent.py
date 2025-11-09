@@ -49,7 +49,6 @@ class OpenAIAgent(BaseAgent):
             messages=cast(list[ChatCompletionMessageParam], converted_history),
             tools=cast(list[ChatCompletionToolUnionParam], tools),
             tool_choice="required",
-            reasoning_effort="minimal",
         )
 
         return self.assistant_response_converter.from_dict(data=response.model_dump())
