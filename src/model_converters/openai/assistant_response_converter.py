@@ -39,7 +39,6 @@ from ...env import settings
 
 
 class OpenAIAssistantResponseConverter:
-
     def __init__(
         self,
         ai_model: AIModel | None = None,
@@ -97,9 +96,13 @@ class OpenAIAssistantResponseConverter:
         )
 
     def to_list_dict(self, data: AssistantResponse) -> list[dict]:
-        assistant_content = [
-            {"type": "text", "text": data.text_response},
-        ]
+        assistant_content = (
+            [
+                {"type": "text", "text": data.text_response},
+            ]
+            if data.text_response
+            else ""
+        )
 
         tool_call_parts = [
             self.tool_call_converter.to_dict(tc) for tc in data.tool_calls
@@ -121,7 +124,7 @@ class OpenAIAssistantResponseConverter:
         return AssistantResponse(
             history_type="assistant-response",
             reasoning=choice_0_message.get("reasoning", None),
-            text_response=choice_0_message.get("content", None),
+            text_response=choice_0_message.get("content", ""),
             tool_calls=tool_calls,
             hydrated_tool_calls=hydrated_tool_calls,
             timestamp=str(int(time.time() * 1000)),

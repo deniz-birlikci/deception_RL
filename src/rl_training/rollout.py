@@ -162,7 +162,9 @@ async def get_completion_with_retries(
 
     while num_retries < max_retries:
         try:
+            type_shit = str(uuid.uuid4())
             # Get LLM response with tool calling
+            print(f"[uuid={type_shit}] messages={messages}")
             async with trajectory.track_duration("llm_completion"):
                 chat_completion = await get_completion_with_tools(
                     model=model,
@@ -172,7 +174,10 @@ async def get_completion_with_retries(
                     enable_thinking=enable_thinking,
                 )
 
+            print(f"[uuid={type_shit}] chat_completion={chat_completion}")
+
             choice = chat_completion.choices[0]
+            print(f"[uuid={type_shit}] choice={choice}")
             trajectory.messages_and_choices.append(choice)
 
             if verbose:
@@ -307,7 +312,9 @@ async def rollout(
             terminal_state: TerminalState = model_input.terminal_state
             trajectory.reward = terminal_state.reward
             # Validate game_id matches (sanity check)
-            assert terminal_state.game_id == game_id, f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
+            assert terminal_state.game_id == game_id, (
+                f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
+            )
 
             if verbose:
                 print(f"\n{'=' * 60}")

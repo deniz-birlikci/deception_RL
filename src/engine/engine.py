@@ -106,6 +106,17 @@ class Engine:
                 )
             )
 
+        # Toy OpenAI Model Factory
+        self._openai_agent_for_message_rendering = AgentRegistry.create_agent(
+            backend=Backend.OPENAI,
+            agent=Agent(
+                agent_id="dummy-agent",
+                role=AgentRole.LIBERAL,
+                ai_model=AIModel.OPENAI_GPT_5_NANO,
+            ),
+            ai_model=AIModel.OPENAI_GPT_5_NANO,
+        )
+
     def _generate_terminal_state(self) -> TerminalState:
         # TODO: check if I've won, populate it with the correct terminal state
         winners = self._get_winners()
@@ -269,7 +280,9 @@ class Engine:
         eligible_agent_ids: list[str] | None = None,
     ) -> Tools:
         agent = self.agents_by_id[agent_id]
-        new_user_inputs = self._get_new_user_events_since_last_message(agent_id, prompt_guidance)
+        new_user_inputs = self._get_new_user_events_since_last_message(
+            agent_id, prompt_guidance
+        )
 
         for user_input in new_user_inputs:
             self.msg_history[agent_id].append(user_input)
@@ -286,9 +299,13 @@ class Engine:
                 openai_schema=tool_schema,
             )
 
-            messages = []
-            for msg in self.msg_history[agent_id]:
-                messages.append(msg.model_dump())
+            # Convert message history to messages
+            message_history = self.msg_history[agent_id]
+            messages = (
+                self._openai_agent_for_message_rendering._convert_message_history(
+                    message_history
+                )
+            )
 
             model_input = ModelInput(
                 messages=messages,
