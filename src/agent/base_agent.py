@@ -8,6 +8,44 @@ from ..models import (
 )
 from ..model_converters import BaseModelConverterFactory, ModelConverterFactoryRegistry
 from ..env import settings
+from ..models import Agent
+from functools import wraps
+from pathlib import Path
+from datetime import datetime
+import json
+
+
+def log_messages(func):
+    """Decorator to log messages sent to the model in a text file."""
+
+    @wraps(func)
+    async def wrapper(self, message_history: list[MessageHistory], *args, **kwargs):
+        # Create logs directory if it doesn't exist
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+
+        # Create a unique log file name based on the AI model
+        log_file = logs_dir / f"{self.agent.agent_id}_messages.log"
+
+        # Get current timestamp
+        timestamp = datetime.now().isoformat()
+
+        # Convert message history to a loggable format
+        converted_history = self._convert_message_history(message_history)
+
+        # Write to log file
+        with open(log_file, "a") as f:
+            f.write("=" * 80 + "\n")
+            f.write(f"Timestamp: {timestamp}\n")
+            f.write("=" * 80 + "\n")
+            f.write(json.dumps(converted_history, indent=2))
+            f.write("\n")
+            f.write("=" * 80 + "\n\n")
+
+        # Call the original function
+        return await func(self, message_history, *args, **kwargs)
+
+    return wrapper
 
 
 class BaseAgent(ABC):
@@ -15,6 +53,7 @@ class BaseAgent(ABC):
 
     def __init__(
         self,
+        agent: Agent,
         ai_model: AIModel | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -23,6 +62,7 @@ class BaseAgent(ABC):
     ) -> None:
         self.kwargs = kwargs
 
+        self.agent = agent
         self.ai_model = ai_model or settings.ai.model_id
         self.api_key = api_key
         self.base_url = base_url

@@ -1,6 +1,6 @@
 from typing import cast, Any
-from .base_agent import BaseAgent
-from ..models import AIModel, MessageHistory, AssistantResponse, Backend
+from .base_agent import BaseAgent, log_messages
+from ..models import AIModel, MessageHistory, AssistantResponse, Backend, Agent
 from ..model_converters import BaseModelConverterFactory
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
@@ -13,6 +13,7 @@ class OpenAIAgent(BaseAgent):
 
     def __init__(
         self,
+        agent: Agent,
         ai_model: AIModel | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -20,10 +21,11 @@ class OpenAIAgent(BaseAgent):
         **kwargs: Any,
     ) -> None:
         super().__init__(
-            ai_model,
-            api_key,
-            base_url,
-            model_converter_factory,
+            agent=agent,
+            ai_model=ai_model,
+            api_key=api_key,
+            base_url=base_url,
+            model_converter_factory=model_converter_factory,
             **kwargs,
         )
 
@@ -31,6 +33,7 @@ class OpenAIAgent(BaseAgent):
         self.base_url = self.base_url or settings.openai.base_url
         self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
 
+    @log_messages
     async def generate_response(
         self,
         message_history: list[MessageHistory],

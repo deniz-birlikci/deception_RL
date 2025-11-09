@@ -1,15 +1,11 @@
 import asyncio
 import traceback
 from asyncio import Queue
-import uuid
-import threading
-import traceback
-from queue import Queue
 from typing import Dict
 from src.models import AIModel
 from src.engine.engine import Engine
 from src.engine.deck import Deck
-from src.engine.protocol import ModelInput, ModelOutput
+from src.engine.protocol import ModelInput, ModelOutput, TerminalState
 
 DEFAULT_AI_MODELS = [
     AIModel.OPENAI_GPT_5,
@@ -31,11 +27,10 @@ class EngineAPI:
         game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
-        fascist_policies_to_win: int = 6,
-        liberal_policies_to_win: int = 5,
+        fascist_policies_to_win: int = 3,
+        liberal_policies_to_win: int = 3,
         log_file: str | None = None,
     ) -> ModelInput:
-
         input_queue: Queue = Queue()
         output_queue: Queue = Queue()
 
@@ -51,6 +46,7 @@ class EngineAPI:
         self.engines[game_id] = engine
 
         # Create asyncio task instead of thread
+        print(f"Creating engine task for game {game_id}")
         task = asyncio.create_task(
             self._run_engine(game_id, engine, input_queue, output_queue)
         )
@@ -84,10 +80,12 @@ class EngineAPI:
         input_queue: Queue,
         output_queue: Queue,
     ) -> None:
+        print(f"Running engine task for game {game_id}")
         try:
             await engine.run(input_queue, output_queue)
         except Exception as e:
             tb = traceback.format_exc()
+            print(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
             await output_queue.put(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")
         finally:
             if game_id in self.games:
@@ -102,3 +100,6 @@ class EngineAPI:
 
     def game_exists(self, game_id: str) -> bool:
         return game_id in self.games
+
+    def finalize(self, game_id: str, terminal_state: TerminalState) -> None:
+        pass

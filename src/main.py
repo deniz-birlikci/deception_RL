@@ -1,22 +1,27 @@
 from src.engine.engine_api import EngineAPI
 from src.engine.deck import Deck
 from src.models import AIModel
+import uuid
+import asyncio
 
 
-def main():
+async def main():
     api = EngineAPI()
 
     deck = Deck()
 
     ai_models: list[AIModel | None] = [
-        AIModel.OPENAI_GPT_5_NANO,
-        AIModel.OPENAI_GPT_5_NANO,
-        AIModel.OPENAI_GPT_5_NANO,
-        AIModel.OPENAI_GPT_5_NANO,
-        AIModel.OPENAI_GPT_5_NANO,
+        AIModel.OPENAI_GPT_5,
+        AIModel.OPENAI_GPT_5,
+        AIModel.OPENAI_GPT_5,
+        AIModel.OPENAI_GPT_5,
+        AIModel.OPENAI_GPT_5,
     ]
 
-    result = api.create(deck=deck, ai_models=ai_models, log_file="game_log.txt")
+    game_id = str(uuid.uuid4())
+    result = await api.create(
+        game_id=game_id, deck=deck, ai_models=ai_models, log_file="game_log.txt"
+    )
 
     print("=== GAME STARTED ===")
     print(result)
@@ -36,4 +41,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

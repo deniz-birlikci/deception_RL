@@ -1,5 +1,6 @@
 from typing import Any
 from pydantic import BaseModel
+from src.models import Agent
 
 
 class TerminalState(BaseModel):
@@ -11,8 +12,8 @@ class TerminalState(BaseModel):
     """
 
     # TODO(Charlie): let's define this together
+    winners: list[Agent]
     reward: float
-    have_won: bool
 
 
 class ToolCallTarget(BaseModel):

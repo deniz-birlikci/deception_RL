@@ -1,10 +1,9 @@
 from typing import Dict, Any
-from ..models import Backend, AIModel
+from ..models import Backend, AIModel, Agent
 from .base_agent import BaseAgent
 
 
 class AgentRegistry:
-
     _agent_classes: Dict[Backend, type[BaseAgent]] = {}
 
     @classmethod
@@ -15,6 +14,7 @@ class AgentRegistry:
     def create_agent(
         cls,
         backend: Backend,
+        agent: Agent,
         ai_model: AIModel | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
@@ -25,6 +25,7 @@ class AgentRegistry:
 
         agent_class = cls._agent_classes[backend]
         return agent_class(
+            agent=agent,
             ai_model=ai_model,
             api_key=api_key,
             base_url=base_url,

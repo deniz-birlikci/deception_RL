@@ -61,6 +61,8 @@ class Engine:
         self.hitler_election_threshold = fascist_policies_to_win // 2
         self.log_file = log_file
 
+        assert len(ai_models) == len(ROLES)
+
         shuffled_roles = random.sample(ROLES, len(ROLES))
         agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
         agents = [
@@ -84,17 +86,21 @@ class Engine:
         for aid, agent in self.agents_by_id.items():
             if agent.ai_model:
                 self.ai_agents[aid] = AgentRegistry.create_agent(
-                    backend=Backend.OPENAI, ai_model=agent.ai_model
+                    backend=Backend.OPENAI, agent=agent, ai_model=agent.ai_model
                 )
-
 
     def _generate_terminal_state(self) -> TerminalState:
         # TODO: check if I've won, populate it with the correct terminal state
-        return TerminalState(
-            reward=1.0 if self._get_winners() else 0.0,
-            have_won=self._get_winners(),
-        )
+        winners = self._get_winners()
 
+        # There should be one single policy agent
+        winning_policies = [agent for agent in winners if agent.ai_model is None]
+        assert len(winning_policies) <= 1
+
+        return TerminalState(
+            reward=1.0 if len(winning_policies) == 1 else 0.0,
+            winners=winning_policies,
+        )
 
     async def run(self, input_queue: Queue, output_queue: Queue) -> None:
         while not self._is_game_over():
@@ -460,7 +466,7 @@ class Engine:
         Your Agent ID: {agent_id}
         Your Role: {agent.role}
         Current President: {self.president_rotation[self.current_president_idx]}
-        Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else 'None'}
+        Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else "None"}
         Fascist Policies Played: {self.fascist_policies_played}/{self.fascist_policies_to_win}
         Liberal Policies Played: {self.liberal_policies_played}/{self.liberal_policies_to_win}
         Failed Elections: {self.failed_election_tracker}/3 (at 3, top policy is played automatically)
@@ -527,4 +533,3 @@ class Engine:
         with open(self.log_file, "a") as f:
             f.write("=" * 60 + "\n")
             f.write(json.dumps(state, indent=2) + "\n")
-
