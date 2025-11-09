@@ -77,8 +77,8 @@ function renderPlayers(players) {
       card.classList.add("eliminated");
     }
     
-    // Add (You) if model is None or is_you is true
-    const displayName = (player.model === null || player.is_you) ? `${player.name} (You)` : player.name;
+    // Add (You) if this is the human player
+    const displayName = player.is_you ? `${player.name} (You)` : player.name;
     const nameEl = el("div", "player-name", displayName);
     const roleEl = el("div", "player-role", player.role);
     const titleEl = el("div", "player-title", player.title);
