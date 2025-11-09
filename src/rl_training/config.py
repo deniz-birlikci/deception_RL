@@ -42,6 +42,15 @@ class RolloutConfig:
     verbose: bool = False
     """Print debug information during rollouts."""
 
+    enable_oversampling: bool = False
+    """Enable oversampling mode to keep engine busy with high concurrency."""
+
+    oversampling_concurrency: int = 50
+    """Number of concurrent rollouts when oversampling is enabled."""
+
+    oversampling_timeout_seconds: float = 300.0
+    """Global timeout in seconds for oversampling. Rollouts exceeding this are abandoned."""
+
 
 @dataclass
 class TrainLoopConfig:

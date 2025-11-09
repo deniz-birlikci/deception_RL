@@ -11,7 +11,7 @@ async def main():
 
     deck = Deck()
 
-    ai_models: list[AIModel | None] = [
+    opponent_models = [
         AIModel.OPENAI_GPT_5,
         AIModel.OPENAI_GPT_5,
         AIModel.OPENAI_GPT_5,
@@ -21,7 +21,11 @@ async def main():
 
     game_id = str(uuid.uuid4())
     result = await api.create(
-        game_id=game_id, deck=deck, ai_models=ai_models, log_file="game_log.txt"
+        game_id=game_id,
+        deck=deck,
+        opponent_models=opponent_models,
+        policy_model=None,
+        log_file="game_log.txt"
     )
 
     print("=== GAME STARTED ===")

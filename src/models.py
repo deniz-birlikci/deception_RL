@@ -11,10 +11,12 @@ class AIModel(str, Enum):
     OPENROUTER_GPT_OSS_120b = "openai/gpt-oss-120b:exacto"
     OPENROUTER_KIMI_K2 = "moonshotai/kimi-k2-0905:exacto"
     OPENROUTER_QWEN3_THINKING = "qwen/qwen3-235b-a22b-thinking-2507"
+    QWEN_POLICY_AGENT = "qwen"
 
 
 class Backend(str, Enum):
     OPENAI = "openai"
+    QWEN = "qwen"
 
 
 _TTool = TypeVar("_TTool", bound=str)
@@ -136,7 +138,8 @@ class AgentRole(str, Enum):
 class Agent(BaseModel):
     agent_id: str
     role: AgentRole
-    ai_model: AIModel | None = None
+    ai_model: AIModel
+    is_policy: bool = False
 
 
 class PolicyCard(str, Enum):
