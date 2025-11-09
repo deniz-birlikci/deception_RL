@@ -65,6 +65,8 @@ function renderPlayers(players) {
   }
   
   (players || []).forEach((player) => {
+    console.log(`DEBUG: Rendering player ${player.name} with title: "${player.title}"`);
+    
     const card = el("div", "player-card");
     
     // Add special styling for "You" player
@@ -114,9 +116,47 @@ function renderChat(events, players) {
     playerLookup[p.id] = p;
   });
 
+  // Debug: Log event order to verify chronological rendering
+  if (events && events.length > 0) {
+    console.log(`Rendering ${events.length} events in order:`);
+    events.slice(-5).forEach((ev, index) => { // Show last 5 events
+      if (ev.question_or_statement) {
+        console.log(`  ${events.length - 5 + index + 1}: ${ev.question_or_statement.substring(0, 40)}...`);
+      } else {
+        console.log(`  ${events.length - 5 + index + 1}: ${ev.event_type || 'unknown event'}`);
+      }
+    });
+  }
 
-  (events || []).forEach((ev) => {
+  // Track rounds and insert dividers
+  let roundCounter = 0;
+  let lastEventWasPolicy = false;
+
+  (events || []).forEach((ev, index) => {
     const kind = ev.event_type || "event";
+
+    // Add Round 1 divider at the very beginning
+    if (index === 0 && kind === "president-pick-chancellor") {
+      roundCounter = 1;
+      const divider = el("div", "round-divider");
+      divider.textContent = `——— Round 1 ———`;
+      divider.style.textAlign = "center";
+      divider.style.color = "#9aa0a6";
+      divider.style.fontSize = "12px";
+      divider.style.margin = "10px 0";
+      divider.style.userSelect = "none";
+      root.appendChild(divider);
+    }
+
+    // Insert a round divider immediately after a policy is enacted
+    if (kind === "chancellor-play-policy") {
+      roundCounter += 1;
+      // First render the policy event
+      // (this will be handled by the normal event rendering below)
+      
+      // Then add the round divider after this policy
+      lastEventWasPolicy = true;
+    }
 
     // Left side: table discussion
     if (kind === "ask-to-speak" && ev.question_or_statement) {
@@ -133,14 +173,26 @@ function renderChat(events, players) {
         statement = statement.replace(/@targeted/g, `@${targetName}`);
       }
       
-      // Replace all agent IDs with player names
+      // Replace all agent IDs with player names (case-insensitive, multiple formats)
       Object.keys(playerLookup).forEach(agentId => {
         const player = playerLookup[agentId];
         const playerName = player?.name;
-        if (playerName && statement.includes(agentId)) {
-          // Replace the full UUID with the player name, escaping special regex chars
-          const escapedId = agentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          statement = statement.replace(new RegExp(escapedId, 'gi'), playerName);
+        if (playerName) {
+          // Replace various formats: agent_0, Agent_0, AGENT_0, etc.
+          const patterns = [
+            agentId, // exact: agent_0
+            agentId.charAt(0).toUpperCase() + agentId.slice(1), // Agent_0
+            agentId.toUpperCase(), // AGENT_0
+            agentId.replace('_', ''), // agent0
+            agentId.replace('_', '').charAt(0).toUpperCase() + agentId.replace('_', '').slice(1) // Agent0
+          ];
+          
+          patterns.forEach(pattern => {
+            if (statement.includes(pattern)) {
+              const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              statement = statement.replace(new RegExp(`\\b${escapedPattern}\\b`, 'gi'), playerName);
+            }
+          });
         }
       });
       
@@ -152,9 +204,41 @@ function renderChat(events, players) {
       });
       
       const playerName = (player?.model === null || player?.is_you) ? `${player?.name || ev.agent_id} (You)` : (player?.name || ev.agent_id);
-      const targetInfo = ev.ask_directed_question_to_agent_id 
-        ? ` → @${playerLookup[ev.ask_directed_question_to_agent_id]?.name || "Unknown"}`
-        : "";
+      
+      // Detect if message is addressing someone
+      let targetInfo = "";
+      let addressedPlayer = null;
+      
+      // Check if there's an explicit target
+      if (ev.ask_directed_question_to_agent_id) {
+        addressedPlayer = playerLookup[ev.ask_directed_question_to_agent_id]?.name || "Unknown";
+      } else {
+        // Auto-detect addressing by looking for player names in the message
+        Object.keys(playerLookup).forEach(agentId => {
+          const targetPlayerName = playerLookup[agentId]?.name;
+          if (targetPlayerName && targetPlayerName !== player?.name) {
+            // Check if message starts with the player's name (common addressing pattern)
+            const addressingPatterns = [
+              `${targetPlayerName}:`,
+              `${targetPlayerName},`,
+              `@${targetPlayerName}`,
+              `${targetPlayerName} `,
+            ];
+            
+            for (const pattern of addressingPatterns) {
+              if (statement.toLowerCase().startsWith(pattern.toLowerCase()) || 
+                  statement.toLowerCase().includes(pattern.toLowerCase())) {
+                addressedPlayer = targetPlayerName;
+                break;
+              }
+            }
+          }
+        });
+      }
+      
+      if (addressedPlayer) {
+        targetInfo = ` → @${addressedPlayer}`;
+      }
       
       const messageContainer = el("div", "message-container");
       const meta = el("div", "chat-meta", `${playerName}${targetInfo}`);
@@ -184,15 +268,27 @@ function renderChat(events, players) {
       const isYou = player?.is_you || player?.model === null;
       const bubbleClass = isYou ? "chat-item you" : "chat-item answer";
       
-      // Replace all agent IDs with player names in response text
+      // Replace all agent IDs with player names in response text (case-insensitive, multiple formats)
       let response = ev.response;
       Object.keys(playerLookup).forEach(agentId => {
         const player = playerLookup[agentId];
         const playerName = player?.name;
-        if (playerName && response.includes(agentId)) {
-          // Replace the full UUID with the player name, escaping special regex chars
-          const escapedId = agentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          response = response.replace(new RegExp(escapedId, 'g'), playerName);
+        if (playerName) {
+          // Replace various formats: agent_0, Agent_0, AGENT_0, etc.
+          const patterns = [
+            agentId, // exact: agent_0
+            agentId.charAt(0).toUpperCase() + agentId.slice(1), // Agent_0
+            agentId.toUpperCase(), // AGENT_0
+            agentId.replace('_', ''), // agent0
+            agentId.replace('_', '').charAt(0).toUpperCase() + agentId.replace('_', '').slice(1) // Agent0
+          ];
+          
+          patterns.forEach(pattern => {
+            if (response.includes(pattern)) {
+              const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              response = response.replace(new RegExp(`\\b${escapedPattern}\\b`, 'gi'), playerName);
+            }
+          });
         }
       });
       
@@ -280,6 +376,18 @@ function renderChat(events, players) {
       messageContainer.appendChild(bubble);
       root.appendChild(messageContainer);
     }
+    
+    // Add round divider immediately after a policy is enacted
+    if (kind === "chancellor-play-policy") {
+      const divider = el("div", "round-divider");
+      divider.textContent = `——— Round ${roundCounter} ———`;
+      divider.style.textAlign = "center";
+      divider.style.color = "#9aa0a6";
+      divider.style.fontSize = "12px";
+      divider.style.margin = "10px 0";
+      divider.style.userSelect = "none";
+      root.appendChild(divider);
+    }
   });
 
   // Auto scroll to bottom only if user is already at the bottom
@@ -293,73 +401,176 @@ function renderChat(events, players) {
 }
 
 function renderCardSelection(gameState) {
+  console.log("🎴 CARD SELECTION: Function called!");
+  console.log("🎴 CARD SELECTION: GameState events length:", gameState?.events?.length || 0);
+  
   const presidentCards = document.getElementById("president-cards");
   const chancellorCards = document.getElementById("chancellor-cards");
+  
+  if (!presidentCards || !chancellorCards) {
+    console.warn("Card selection elements not found in DOM");
+    return;
+  }
   
   // Clear existing cards
   presidentCards.innerHTML = "";
   chancellorCards.innerHTML = "";
+  
+  console.log("DEBUG: Rendering card selection, checking events...");
+  console.log("DEBUG: Total events:", gameState?.events?.length || 0);
   
   // Find the most recent president/chancellor card events
   let presidentEvent = null;
   let chancellorEvent = null;
   
   if (gameState && gameState.events) {
+    console.log("DEBUG: Searching through events for card messages...");
     // Search backwards for the most recent events
     for (let i = gameState.events.length - 1; i >= 0; i--) {
       const event = gameState.events[i];
-      if (!presidentEvent && event.cards_drawn) {
-        presidentEvent = event;
+      
+      // Debug: log each event we're checking
+      if (event.question_or_statement) {
+        console.log(`DEBUG: Checking event ${i}: "${event.question_or_statement.substring(0, 50)}..."`);
       }
-      if (!chancellorEvent && event.cards_received) {
-        chancellorEvent = event;
+      
+      // Look for president card draw messages: "You drew 3 cards: [LIBERAL, FASCIST, FASCIST] and discarded FASCIST"
+      if (!presidentEvent && event.question_or_statement && event.question_or_statement.includes("You drew 3 cards:")) {
+        const text = event.question_or_statement;
+        const cardsMatch = text.match(/\[(.*?)\]/);
+        const discardedMatch = text.match(/discarded (\w+)/);
+        
+        if (cardsMatch && discardedMatch) {
+          presidentEvent = {
+            cards_drawn: cardsMatch[1].split(', ').map(card => card.toLowerCase()),
+            card_discarded: discardedMatch[1].toLowerCase()
+          };
+          console.log("DEBUG: Found president event:", presidentEvent);
+        }
       }
+      
+      // Look for chancellor card receive messages: "You received 2 cards from President agent_2: [FASCIST, LIBERAL] and discarded FASCIST"
+      if (!chancellorEvent && event.question_or_statement && event.question_or_statement.includes("You received 2 cards from President")) {
+        const text = event.question_or_statement;
+        const cardsMatch = text.match(/\[(.*?)\]/);
+        const discardedMatch = text.match(/discarded (\w+)/);
+        
+        if (cardsMatch && discardedMatch) {
+          chancellorEvent = {
+            cards_received: cardsMatch[1].split(', ').map(card => card.toLowerCase()),
+            card_discarded: discardedMatch[1].toLowerCase()
+          };
+          console.log("DEBUG: Found chancellor event:", chancellorEvent);
+        }
+      }
+      
       if (presidentEvent && chancellorEvent) break;
     }
+  } else {
+    console.log("DEBUG: No gameState or events available");
   }
+  
+  console.log("DEBUG: Final results - presidentEvent:", presidentEvent);
+  console.log("DEBUG: Final results - chancellorEvent:", chancellorEvent);
   
   // Render President's cards (3 drawn, 1 discarded)
   if (presidentEvent && presidentEvent.cards_drawn) {
+    console.log("DEBUG: Rendering president cards:", presidentEvent.cards_drawn);
     presidentEvent.cards_drawn.forEach((cardType, index) => {
       const cardEl = el("div", "policy-card");
       cardEl.classList.add(cardType); // 'liberal' or 'fascist'
+      cardEl.textContent = cardType.toUpperCase();
+      
+      // Basic styling
+      cardEl.style.padding = "8px 12px";
+      cardEl.style.margin = "2px";
+      cardEl.style.border = "2px solid #333";
+      cardEl.style.borderRadius = "4px";
+      cardEl.style.fontSize = "12px";
+      cardEl.style.fontWeight = "bold";
+      
+      if (cardType === 'liberal') {
+        cardEl.style.backgroundColor = "#4CAF50";
+        cardEl.style.color = "white";
+      } else {
+        cardEl.style.backgroundColor = "#f44336";
+        cardEl.style.color = "white";
+      }
       
       // Mark the discarded card as faded
       if (cardType === presidentEvent.card_discarded) {
         cardEl.classList.add("discarded");
+        cardEl.style.opacity = "0.5";
+        cardEl.style.textDecoration = "line-through";
       }
       
       presidentCards.appendChild(cardEl);
     });
   } else {
+    console.log("DEBUG: No president event found, showing placeholders");
     // Show placeholder cards for President (3 cards)
     for (let i = 0; i < 3; i++) {
       const placeholder = el("div", "card-placeholder");
       placeholder.textContent = i + 1;
+      placeholder.style.padding = "8px 12px";
+      placeholder.style.margin = "2px";
+      placeholder.style.border = "2px dashed #666";
+      placeholder.style.borderRadius = "4px";
+      placeholder.style.backgroundColor = "transparent";
+      placeholder.style.color = "#999";
       presidentCards.appendChild(placeholder);
     }
   }
   
   // Render Chancellor's cards (2 received, 1 discarded/played)
   if (chancellorEvent && chancellorEvent.cards_received) {
+    console.log("DEBUG: Rendering chancellor cards:", chancellorEvent.cards_received);
     chancellorEvent.cards_received.forEach((cardType, index) => {
       const cardEl = el("div", "policy-card");
       cardEl.classList.add(cardType); // 'liberal' or 'fascist'
+      cardEl.textContent = cardType.toUpperCase();
+      
+      // Basic styling
+      cardEl.style.padding = "8px 12px";
+      cardEl.style.margin = "2px";
+      cardEl.style.border = "2px solid #333";
+      cardEl.style.borderRadius = "4px";
+      cardEl.style.fontSize = "12px";
+      cardEl.style.fontWeight = "bold";
+      
+      if (cardType === 'liberal') {
+        cardEl.style.backgroundColor = "#4CAF50";
+        cardEl.style.color = "white";
+      } else {
+        cardEl.style.backgroundColor = "#f44336";
+        cardEl.style.color = "white";
+      }
       
       // Mark the card that was NOT discarded as played (the one that was enacted)
       if (cardType !== chancellorEvent.card_discarded) {
         cardEl.classList.add("played");
+        cardEl.style.border = "3px solid gold";
+        cardEl.style.boxShadow = "0 0 8px rgba(255, 215, 0, 0.6)";
       } else {
         cardEl.classList.add("discarded");
+        cardEl.style.opacity = "0.5";
+        cardEl.style.textDecoration = "line-through";
       }
       
       chancellorCards.appendChild(cardEl);
     });
   } else {
+    console.log("DEBUG: No chancellor event found, showing placeholders");
     // Show placeholder cards for Chancellor (2 cards)
     for (let i = 0; i < 2; i++) {
       const placeholder = el("div", "card-placeholder");
       placeholder.textContent = i + 1;
+      placeholder.style.padding = "8px 12px";
+      placeholder.style.margin = "2px";
+      placeholder.style.border = "2px dashed #666";
+      placeholder.style.borderRadius = "4px";
+      placeholder.style.backgroundColor = "transparent";
+      placeholder.style.color = "#999";
       chancellorCards.appendChild(placeholder);
     }
   }
@@ -415,27 +626,57 @@ function renderTracks(gameState) {
 
 async function refreshState() {
   if (!GAME_ID) return;
+  
   try {
+    const prevEventCount = LAST_EVENT_COUNT;
     const state = await API.state(GAME_ID);
-    if (!state.ok) throw new Error(state.error || "State error");
-
-    console.log("State received:", {
-      eventCount: state.events?.length || 0,
-      playerCount: state.players?.length || 0,
-      liberal: state.liberal_policies,
-      fascist: state.fascist_policies
-    });
-
-    setStatus({ tick: true });
+    if (!state.ok) {
+      // If game not found, try to create a new one
+      if (state.error === "game not found" || state.error === "no game exists") {
+        console.log("Game not found, creating new game...");
+        GAME_ID = await API.createGame();
+        return; // Will retry on next poll
+      }
+      throw new Error(state.error || "State error");
+    }
+    
+    // Update GAME_ID if server provides it (prevents future mismatches)
+    if (state.game_id && state.game_id !== GAME_ID) {
+      console.log(`Syncing game ID: ${GAME_ID} -> ${state.game_id}`);
+      GAME_ID = state.game_id;
+    }
+    
     renderPlayers(state.players);
     renderChat(state.events, state.players);
     renderTracks(state);
     renderCardSelection(state); // Pass full state to show card selection
     
-    // Update event count for real-time polling
-    LAST_EVENT_COUNT = (state.events || []).length;
-  } catch (err) {
-    console.error(err);
+    // Update event count and show new message indicator
+    const newEventCount = (state.events || []).length;
+    if (newEventCount > prevEventCount) {
+      const newMessages = newEventCount - prevEventCount;
+      console.log(`📨 ${newMessages} new message(s) received - Total: ${newEventCount}`);
+      
+      // Log the actual new messages for debugging
+      const newEvents = (state.events || []).slice(prevEventCount);
+      newEvents.forEach((event, index) => {
+        if (event.question_or_statement) {
+          console.log(`  New message ${prevEventCount + index + 1}: ${event.question_or_statement.substring(0, 50)}...`);
+        } else {
+          console.log(`  New event ${prevEventCount + index + 1}: ${event.event_type || 'unknown'}`);
+        }
+      });
+      
+      // Scroll to bottom to show new messages
+      const chatList = document.querySelector("#chat-list");
+      if (chatList) {
+        chatList.scrollTop = chatList.scrollHeight;
+      }
+    }
+    
+    LAST_EVENT_COUNT = newEventCount;
+  } catch (error) {
+    console.error("Failed to refresh state:", error);
   }
 }
 
@@ -445,35 +686,40 @@ function startRealtimePolling() {
     clearInterval(REALTIME_POLL_INTERVAL);
   }
   
-  // Poll every 500ms during active discussion
+  console.log("Starting aggressive real-time polling for live updates");
   REALTIME_POLL_INTERVAL = setInterval(async () => {
     if (!GAME_ID) return;
     
     try {
-      const state = await API.state(GAME_ID);
-      if (!state.ok) return;
+      const prevEventCount = LAST_EVENT_COUNT; // Define prevEventCount here
+      await refreshState(); // Use the main refresh function which handles everything
       
-      const currentEventCount = (state.events || []).length;
-      
-      // Only re-render if new events appeared
-      if (currentEventCount > LAST_EVENT_COUNT) {
-        console.log(`New events detected: ${currentEventCount - LAST_EVENT_COUNT} new messages`);
-        renderChat(state.events, state.players);
-        LAST_EVENT_COUNT = currentEventCount;
+      // If we got new events, log them
+      if (LAST_EVENT_COUNT > prevEventCount) {
+        console.log(`📨 ${LAST_EVENT_COUNT - prevEventCount} new events detected via real-time polling`);
       }
-    } catch (err) {
-      console.error("Real-time polling error:", err);
+    } catch (error) {
+      console.error("Real-time polling error:", error);
     }
-  }, 500); // Poll every 500ms
+  }, 100); // Poll every 100ms for maximum responsiveness
   
-  // Stop real-time polling after 2 minutes (discussion should be done by then)
+  // Stop aggressive polling after 5 minutes, but keep checking periodically
   setTimeout(() => {
     if (REALTIME_POLL_INTERVAL) {
       clearInterval(REALTIME_POLL_INTERVAL);
       REALTIME_POLL_INTERVAL = null;
-      console.log("Real-time polling stopped");
+      console.log("Aggressive polling stopped, switching to normal polling");
+      
+      // Continue with slower polling
+      REALTIME_POLL_INTERVAL = setInterval(async () => {
+        try {
+          await refreshState();
+        } catch (error) {
+          console.error("Polling error:", error);
+        }
+      }, 2000); // Poll every 2 seconds after aggressive period
     }
-  }, 120000); // 2 minutes
+  }, 300000); // 5 minutes of aggressive polling
 }
 
 function installControls() {
@@ -527,7 +773,10 @@ async function main() {
     console.warn("Failed to auto-create game:", e);
   }
 
-  POLL_INTERVAL = setInterval(refreshState, 3000);
+  POLL_INTERVAL = setInterval(refreshState, 1000); // Poll every 1 second for more responsive updates
+  
+  // Start aggressive polling during active gameplay
+  startRealtimePolling();
 }
 
 window.addEventListener("DOMContentLoaded", main);

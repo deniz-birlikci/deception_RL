@@ -3,7 +3,13 @@ from .base_agent import BaseAgent, log_messages
 from ..models import AIModel, MessageHistory, AssistantResponse, Backend, Agent
 from ..model_converters import BaseModelConverterFactory
 from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
+from openai.types.chat import ChatCompletionMessageParam
+# Handle different OpenAI versions
+try:
+    from openai.types.chat import ChatCompletionToolUnionParam
+except ImportError:
+    # For older OpenAI versions, use Any as fallback
+    ChatCompletionToolUnionParam = Any
 from ..tools import generate_tools
 from ..env import settings
 
