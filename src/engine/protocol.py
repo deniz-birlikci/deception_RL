@@ -8,10 +8,12 @@ class TerminalState(BaseModel):
     Represents the final state of a completed game.
 
     Attributes:
+        game_id: Unique identifier for the game
+        winners: List of agents who won the game
         reward: Final reward value (based on win/loss)
     """
 
-    # TODO(Charlie): let's define this together
+    game_id: str
     winners: list[Agent]
     reward: float
 
