@@ -1,6 +1,5 @@
-import asyncio
+import json
 import math
-import os
 
 import openai
 import requests
@@ -20,12 +19,62 @@ import art
 
 load_dotenv()
 
+# Define the tool for making moves in 2048
+MAKE_MOVE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "make_move",
+        "description": (
+            "Make a move in the 2048 game. Choose one of the four directions: "
+            "'left', 'right', 'up', or 'down'. This will slide all tiles in that direction "
+            "and combine matching tiles. After your move, a new tile (2 or 4) will be added "
+            "to a random empty cell."
+        ),
+        "strict": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "enum": ["left", "right", "up", "down"],
+                    "description": "The direction to move all tiles on the board.",
+                }
+            },
+            "required": ["direction"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+TOOLS = [MAKE_MOVE_TOOL]
+
 
 @weave.op
 @art.retry(exceptions=(openai.LengthFinishReasonError, requests.ReadTimeout))
 async def rollout(
-    model: art.Model, step: int, is_validation: bool, verbose: bool = False
+    model: art.Model,
+    step: int,
+    is_validation: bool,
+    verbose: bool = False,
+    max_turns: int = 200,
+    enable_thinking: bool = True,
 ) -> art.Trajectory:
+    """
+    Run a single 2048 game rollout.
+
+    Args:
+        model: The ART model to use
+        step: Training step number
+        is_validation: Whether this is a validation run
+        verbose: Print debug information
+        max_turns: Maximum number of moves before forcing game end
+        enable_thinking: Enable internal thinking for Qwen3 models (default: True)
+            When True, Qwen3-4B-Thinking models will generate explicit reasoning
+            in <think></think> blocks before making tool calls.
+
+    Returns:
+        Trajectory containing the game history and reward
+    """
     game = generate_game()
 
     move_number = 0
@@ -34,7 +83,13 @@ async def rollout(
         messages_and_choices=[
             {
                 "role": "system",
-                "content": "You are an excellent 2048 player. Always choose the move most likely to lead to combine cells to eventually reach the number 2048. Optional moves are 'left', 'right', 'up', 'down'. Return your move as an XML object with a single property 'move', like so: <move>left</move>",
+                "content": (
+                    "You are an excellent 2048 player. Your goal is to combine tiles "
+                    "to reach the number 2048 (or higher). Use the make_move tool to "
+                    "make your moves. Analyze the board carefully and choose the move "
+                    "most likely to lead to combining cells and eventually reaching 2048. "
+                    "Available moves are: 'left', 'right', 'up', 'down'."
+                ),
             },
         ],
         metadata={
@@ -46,19 +101,41 @@ async def rollout(
     )
 
     while True:
+        # Check if we've hit max turns
+        if move_number >= max_turns:
+            if verbose:
+                print(f"Max turns ({max_turns}) reached, ending game")
+            break
+
+        # Add the current board state as a user message
+        board_state = render_board(game)
         trajectory.messages_and_choices.append(
-            {"role": "user", "content": render_board(game)}
+            {"role": "user", "content": f"{board_state}"}
         )
         if verbose:
-            print(render_board(game))
+            print(f"Move {move_number + 1}:")
+            print(board_state)
 
         async def get_completion():
             client = model.openai_client()
-            return await client.chat.completions.create(
-                max_completion_tokens=128,
-                messages=trajectory.messages(),
-                model=model.name,
-            )
+            
+            # Build base parameters
+            params = {
+                "max_completion_tokens": 512,  # Increased for thinking content
+                "messages": trajectory.messages(),
+                "model": model.name,
+                "tools": TOOLS,
+                "tool_choice": {"type": "function", "function": {"name": "make_move"}},  # Force the model to use make_move tool
+            }
+            
+            # For Qwen3 models, enable internal thinking via chat_template_kwargs
+            # This allows the model to reason before generating tool calls
+            if "qwen" in model.name.lower():
+                params["extra_body"] = {
+                    "chat_template_kwargs": {"enable_thinking": enable_thinking}
+                }
+            
+            return await client.chat.completions.create(**params)
 
         try:
             chat_completion = await get_completion()
@@ -69,20 +146,33 @@ async def rollout(
             raise e
 
         choice = chat_completion.choices[0]
-        content = choice.message.content
-        assert isinstance(content, str)
+        message = choice.message
+        
+        # Add the assistant's message (with tool call) to the trajectory
         trajectory.messages_and_choices.append(choice)
 
+        tool_call = message.tool_calls[0]
+        args = json.loads(tool_call.function.arguments)
+        direction = args["direction"]
+
+        if verbose:
+            print(f"Tool call: make_move(direction='{direction}')")
+
         try:
-            apply_agent_move(game, content)
-            if verbose:
-                print(content)
+            apply_agent_move(game, f"<move>{direction}</move>")
             move_number += 1
         except ValueError:
             trajectory.metrics["invalid_move"] = 1
             trajectory.reward = -1
             break
 
+        trajectory.messages_and_choices.append({
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "content": f"Move '{direction}' applied."
+        })
+
+        # Check if game is finished
         if check_game_finished(game):
             trajectory.metrics["invalid_move"] = 0
             break
