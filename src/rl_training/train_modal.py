@@ -43,11 +43,11 @@ image = (
 
 @app.function(
     image=image,
-    gpu=modal.gpu.H100(),  # Will be overridden by config
+    gpu="H100:8",  # Will be overridden by config
     timeout=7200,  # Will be overridden by config
     secrets=[
         modal.Secret.from_name("wandb-secret"),
-        modal.Secret.from_name("rl_deception"),
+        modal.Secret.from_name("art-secrets"),
     ],  # Will be overridden by config
     # mounts=[modal.Mount.from_local_dir(".", remote_path="/root/2048_example")],
 )
