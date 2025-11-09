@@ -35,7 +35,7 @@ from src.agent.agent_registry import AgentRegistry
 from src.engine.external_agent_response_parser import ExternalAgentResponseParser
 from src.models import Tools
 from src.engine.prompts import get_base_game_rules_prompt
-from src.tools import OPENAI_TOOLS
+from src.tools import generate_tools
 
 ROLES = [
     AgentRole.HITLER,
@@ -248,19 +248,16 @@ class Engine:
         full_prompt = self._build_prompt_for_agent(agent_id, prompt_guidance)
 
         if agent.ai_model is None:
-            tools = (
-                [t for t in OPENAI_TOOLS if t["function"]["name"] in allowed_tools]
-                if allowed_tools
-                else OPENAI_TOOLS
-            )
-
-            # Assert that there is only one tool
-            assert len(tools) == 1
+            tool_schema = generate_tools(allowed_tools, eligible_agent_ids)
+            # Assert that there is only one allowed tool
+            assert len(tool_schema) == 1
+            tool_name = allowed_tools[0]
+            tool_schema = tool_schema[0]
 
             # Create the tool call target
             tool_call_target = ToolCallTarget(
-                name=tools[0]["function"]["name"],
-                openai_schema=tools[0],
+                name=tool_name,
+                openai_schema=tool_schema,
             )
 
             # Create the new model input
