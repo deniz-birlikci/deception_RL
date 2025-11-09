@@ -295,6 +295,7 @@ class Engine:
 
             await output_queue.put(model_input)
             response = ExternalAgentResponseParser.parse(await input_queue.get())
+            self.msg_history[agent_id].append(response)
         else:
             response = await self.ai_agents[agent_id].generate_response(
                 self.msg_history[agent_id],
