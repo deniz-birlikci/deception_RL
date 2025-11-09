@@ -54,12 +54,14 @@ class Engine:
         ai_models: list[AIModel | None],
         fascist_policies_to_win: int,
         liberal_policies_to_win: int,
+        game_id: str,
         log_file: str | None = None,
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
         self.liberal_policies_to_win = liberal_policies_to_win
         self.hitler_election_threshold = fascist_policies_to_win // 2
+        self.game_id = game_id
         self.log_file = log_file
 
         assert len(ai_models) == len(ROLES)
@@ -113,6 +115,7 @@ class Engine:
         assert len(winning_policies) <= 1
 
         return TerminalState(
+            game_id=self.game_id,
             reward=1.0 if len(winning_policies) == 1 else 0.0,
             winners=winning_policies,
         )

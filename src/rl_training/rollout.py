@@ -306,7 +306,8 @@ async def rollout(
             game_over = True
             terminal_state: TerminalState = model_input.terminal_state
             trajectory.reward = terminal_state.reward
-            trajectory.metadata["game_id"] = terminal_state.game_id
+            # Validate game_id matches (sanity check)
+            assert terminal_state.game_id == game_id, f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
 
             if verbose:
                 print(f"\n{'=' * 60}")
