@@ -1,27 +1,16 @@
 import asyncio
+import math
+import os
 import random
+import shutil
 from pathlib import Path
+from collections import Counter
 
 import modal
 from omegaconf import OmegaConf
 
 import art
-from src.rl_training.word_list import WORD_LIST
-
-
-def generate_experiment_name(base_name: str) -> str:
-    """
-    Generate a random experiment name with format: {word1}_{word2}_{base_name}
-
-    Args:
-        base_name: The base model name from config
-
-    Returns:
-        Random experiment name
-    """
-    word1, word2 = random.sample(WORD_LIST, 2)
-    return f"{word1}_{word2}_{base_name}"
-
+from art.utils.output_dirs import get_model_dir
 
 # Create Modal app
 app = modal.App("SecretHitler-training")
@@ -40,7 +29,8 @@ image = (
         "python-dotenv",
         "openai>=1.65.5",
         "requests",
-        "weave==0.52.16",
+        "weave>=0.51.51",
+        "wandb",
         "numpy==1.26.4",
         "s3fs",
         "omegaconf",
@@ -179,8 +169,8 @@ async def gather_rollouts_with_timeout(
 
 @app.function(
     image=image,
-    gpu="H100:4",  # Will be overridden by config
-    timeout=7200,  # Will be overridden by config
+    gpu="H100",  # Will be overridden by config
+    timeout=43200,  # 12 hours, can be overridden by config
     secrets=[
         modal.Secret.from_name("wandb-secret"),
         modal.Secret.from_name("art-secrets"),
@@ -195,12 +185,18 @@ async def train(config_dict: dict):
         config_dict: Configuration dictionary (loaded from YAML and serialized)
     """
     # NOW import these - they run in Modal's environment with all deps
-    from .rollout import rollout
+    import logging
+    from .rollout import rollout_with_timeout
     from .config import TrainingConfig
     from .metrics_utils import compute_role_based_metrics, compute_oversampling_role_metrics
     from art.local import LocalBackend
-    import weave
     import wandb
+
+    # Silence noisy HTTP loggers - only show gather progress
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     # Reconstruct config from dict
     config = OmegaConf.structured(TrainingConfig)
@@ -210,11 +206,15 @@ async def train(config_dict: dict):
     print(OmegaConf.to_yaml(config))
     print("=" * 50)
 
-    # Generate random experiment name BEFORE setting seed (so it's random across runs)
-    experiment_name = generate_experiment_name(config.model.name)
-    print(f"Generated experiment name: {experiment_name}")
+    # Initialize W&B for logging
+    wandb.init(
+        project=config.model.project,
+        name=config.model.name,
+        config=OmegaConf.to_container(config, resolve=True),
+        reinit=True,
+    )
 
-    # Set random seed for reproducible training
+    # Set random seed
     random.seed(config.train.random_seed)
 
     print("Starting training")
@@ -236,9 +236,53 @@ async def train(config_dict: dict):
         ),
     )
 
-    # Initialize the backend
-    backend = LocalBackend()
+    # Initialize the backend (prefer ART_STORAGE_PATH or Modal volume)
+    storage_path = os.environ.get("ART_STORAGE_PATH")
+    default_mount = Path("/root/.art")
+    if storage_path is None and default_mount.exists():
+        storage_path = str(default_mount)
+
+    if storage_path:
+        backend = LocalBackend(path=storage_path)
+        backend_path = storage_path
+    else:
+        backend = LocalBackend()
+        backend_path = backend._path  # type: ignore[attr-defined]
     print("Backend initialized")
+
+    # Handle checkpoint start behavior
+    checkpoint_mode = (config.checkpoint.mode or "latest").lower()
+    checkpoint_step = config.checkpoint.step
+    model_dir = Path(get_model_dir(model=model, art_path=backend_path))
+    checkpoint_dir = model_dir / "checkpoints"
+
+    if checkpoint_mode not in {"latest", "scratch", "specific"}:
+        raise ValueError(
+            f"Unknown checkpoint.mode='{config.checkpoint.mode}'. "
+            "Valid options: latest, scratch, specific."
+        )
+
+    if checkpoint_mode == "scratch":
+        if model_dir.exists():
+            shutil.rmtree(model_dir)
+            print(f"Removed existing model directory at {model_dir} to start from scratch.")
+        else:
+            print("No existing model directory found; starting from scratch.")
+    elif checkpoint_mode == "specific":
+        if checkpoint_step is None:
+            raise ValueError("checkpoint.step must be set when checkpoint.mode='specific'.")
+        specific_dir = checkpoint_dir / f"{checkpoint_step:04d}"
+        if not specific_dir.exists():
+            raise FileNotFoundError(
+                f"Checkpoint for step {checkpoint_step} not found at {specific_dir}."
+            )
+        if checkpoint_dir.exists():
+            for child in checkpoint_dir.iterdir():
+                if child.is_dir() and child.name.isdigit() and int(child.name) != checkpoint_step:
+                    shutil.rmtree(child)
+        print(f"Resuming from checkpoint step {checkpoint_step:04d}.")
+    else:
+        print("Checkpoint mode set to 'latest' (default resume).")
 
     # Register the model with the local backend (sets up logging, inference, and training)
     await model.register(backend)
@@ -252,68 +296,101 @@ async def train(config_dict: dict):
     )
 
     # Train for specified steps
+    # Each game has a 5-min timeout (in rollout_with_timeout), so stalled games fail individually
+    # This means we keep completed games even if some timeout!
+    
     for i in range(await model.get_step(), config.train.train_steps):
         print(f"Starting training step {i}/{config.train.train_steps}")
 
-        # Determine rollout strategy based on oversampling config
-        if config.rollout.enable_oversampling:
-            print(
-                f"Oversampling enabled: launching {config.rollout.oversampling_concurrency} rollouts, "
-                f"timeout={config.rollout.oversampling_timeout_seconds}s"
-            )
-            train_groups, oversampling_metrics = await gather_rollouts_with_timeout(
-                model=model,
-                step=i,
-                is_validation=False,
-                oversampling_concurrency=config.rollout.oversampling_concurrency,
-                timeout_seconds=config.rollout.oversampling_timeout_seconds,
-                max_turns=config.rollout.max_turns,
-                enable_thinking=config.rollout.enable_thinking,
-                verbose=config.rollout.verbose,
-            )
-            print(f"Oversampling metrics: {oversampling_metrics}")
-            
-            # Compute role-based oversampling metrics
-            completed_trajs = []
-            for group in train_groups:
-                completed_trajs.extend(group.trajectories)
-            
-            oversampling_role_metrics = compute_oversampling_role_metrics(
-                completed_trajectories=completed_trajs,
-                total_launched=oversampling_metrics["total_launched"],
-                total_abandoned=oversampling_metrics["total_abandoned"],
-            )
-            
-            # Log oversampling metrics to wandb
-            wandb.log({
-                f"oversampling/{k}": v 
-                for k, v in oversampling_metrics.items()
-            }, step=i)
-            
-            # Log oversampling role metrics
-            if oversampling_role_metrics:
-                wandb.log(oversampling_role_metrics, step=i)
-        else:
-            # Standard rollout without oversampling
-            train_groups = await art.gather_trajectory_groups(
-                (
-                    art.TrajectoryGroup(
-                        # for each step, rollout simultaneous games
-                        rollout(
-                            model,
-                            i,
-                            is_validation=False,
-                            max_turns=config.rollout.max_turns,
-                            enable_thinking=config.rollout.enable_thinking,
-                            verbose=config.rollout.verbose,
-                        )
-                        for _ in range(config.rollout.simultaneous_games)
+        # Per-game timeouts mean stalled games fail individually, keeping completed ones
+        train_groups = await art.gather_trajectory_groups(
+            (
+                art.TrajectoryGroup(
+                    # for each step, rollout simultaneous games (with per-game timeout)
+                    rollout_with_timeout(
+                        model,
+                        i,
+                        is_validation=False,
+                        max_turns=config.rollout.max_turns,
+                        enable_thinking=config.rollout.enable_thinking,
+                        verbose=config.rollout.verbose,
+                        trainable_fascist_prob=config.rollout.trainable_fascist_prob,
                     )
-                    for _ in range(1)
-                ),
-                pbar_desc="gather",
-                max_exceptions=10,
+                    for _ in range(config.rollout.simultaneous_games)
+                )
+                for _ in range(1)
+            ),
+            pbar_desc="gather",
+            max_exceptions=config.rollout.simultaneous_games,  # Allow all to fail individually
+        )
+
+        # Log step-level aggregate metrics
+        all_trajectories = [t for group in train_groups for t in group.trajectories]
+        games_completed = len(all_trajectories)
+        games_expected = config.rollout.simultaneous_games
+        min_games_for_training = max(1, math.ceil(games_expected * 0.5))
+        fascist_starts = sum(
+            int(t.metrics.get("trainable_fascist_start", 0)) for t in all_trajectories
+        )
+        winning_team_counts = Counter(
+            (t.metadata.get("winning_team") or "unknown") for t in all_trajectories
+        )
+        role_counts = Counter(
+            (t.metadata.get("trainable_role") or "unknown") for t in all_trajectories
+        )
+
+        exception_counts = Counter(
+            exc.type for group in train_groups for exc in group.exceptions
+        )
+        total_exceptions = sum(exception_counts.values())
+
+        if games_completed >= min_games_for_training:
+            rewards = [t.reward for t in all_trajectories]
+            wins = sum(1 for r in rewards if r > 0)
+            wandb.log({
+                "step/mean_reward": sum(rewards) / len(rewards),
+                "step/max_reward": max(rewards),
+                "step/min_reward": min(rewards),
+                "step/win_rate": wins / len(rewards),
+                "step/exceptions": total_exceptions,
+                "step/games_completed": games_completed,
+                "step/games_expected": games_expected,
+                "step/trainable_fascist_starts": fascist_starts,
+                "step/fascist_wins": winning_team_counts.get("fascist", 0),
+                "step/liberal_wins": winning_team_counts.get("liberal", 0),
+                "step/trainable_role_hitler": role_counts.get("hitler", 0),
+                "step/trainable_role_fascist": role_counts.get("fascist", 0),
+                "step/trainable_role_liberal": role_counts.get("liberal", 0),
+            }, step=i)
+            print(f"Step {i}: {games_completed}/{games_expected} games completed, training...")
+            print(f"Winning teams: {dict(winning_team_counts)} | Roles: {dict(role_counts)}")
+        else:
+            wandb.log({
+                "step/games_completed": games_completed,
+                "step/games_expected": games_expected,
+                "step/exceptions": total_exceptions,
+                "step/trainable_fascist_starts": fascist_starts,
+                "step/fascist_wins": winning_team_counts.get("fascist", 0),
+                "step/liberal_wins": winning_team_counts.get("liberal", 0),
+                "step/trainable_role_hitler": role_counts.get("hitler", 0),
+                "step/trainable_role_fascist": role_counts.get("fascist", 0),
+                "step/trainable_role_liberal": role_counts.get("liberal", 0),
+            }, step=i)
+            failure_breakdown = ""
+            if total_exceptions:
+                top_failures = ", ".join(
+                    f"{name.split('.')[-1]}: {count}"
+                    for name, count in exception_counts.most_common(3)
+                )
+                failure_breakdown = f" Failures: {top_failures}"
+            print(
+                f"Step {i}: Only {games_completed}/{games_expected} games completed "
+                f"(need ≥{min_games_for_training}), skipping training."
+                f"{failure_breakdown}"
             )
+            if winning_team_counts:
+                print(f"Winning teams: {dict(winning_team_counts)} | Roles: {dict(role_counts)}")
+            continue
 
         # Compute and log role-based metrics for all trajectories
         role_metrics = compute_role_based_metrics(train_groups)
@@ -330,25 +407,30 @@ async def train(config_dict: dict):
 
 
 @app.local_entrypoint()
-def main(config_path: str = "configs/train_default.yaml"):
+def main(config_path: str | None = None):
     """
     Local entrypoint for running the training on Modal.
 
     Args:
-        config_path: Path to YAML config file (default: configs/train_default.yaml)
+        config_path: Path to YAML config file (default: src/rl_training/configs/train_default.yaml)
 
     Usage:
-        modal run src/rl_training/train_modal.py
-        modal run src/rl_training/train_modal.py --config-path configs/my_config.yaml
+        modal run -m src.rl_training.train_modal
+        modal run -m src.rl_training.train_modal --config-path src/rl_training/configs/my_config.yaml
     """
     from .config import TrainingConfig
 
-    # Load config from YAML
-    config_file = Path(config_path)
+    # Default to config relative to this script
+    if config_path is None:
+        script_dir = Path(__file__).parent
+        config_file = script_dir / "configs" / "train_default.yaml"
+    else:
+        config_file = Path(config_path)
+    
     if not config_file.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
+        raise FileNotFoundError(f"Config file not found: {config_file}")
 
-    print(f"Loading config from: {config_path}")
+    print(f"Loading config from: {config_file}")
 
     # Load YAML and merge with structured config
     yaml_config = OmegaConf.load(config_file)
@@ -370,10 +452,10 @@ def main(config_path: str = "configs/train_default.yaml"):
 
 if __name__ == "__main__":
     # For local testing (not on Modal)
-    # This won't actually run on Modal, just locally
     from .config import TrainingConfig
 
-    config_file = Path("configs/train_default.yaml")
+    script_dir = Path(__file__).parent
+    config_file = script_dir / "configs" / "train_default.yaml"
     yaml_config = OmegaConf.load(config_file)
     structured_config = OmegaConf.structured(TrainingConfig)
     config = OmegaConf.merge(structured_config, yaml_config)

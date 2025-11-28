@@ -1,5 +1,6 @@
+import asyncio
 import json
-import time
+import logging
 import uuid
 from typing import Any, Callable
 
@@ -15,23 +16,40 @@ from src.engine.protocol import (
 )
 from src.engine.engine_api import EngineAPI
 from src.engine.deck import Deck
-from src.models import AIModel
+from src.models import AIModel, AgentRole
 import art
 from art.types import Messages
 from openai.types.chat.chat_completion import Choice
 
+import time
+
 load_dotenv()
+
+# Configure logging - suppress noisy HTTP logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+# Silence noisy loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("openai").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
 
 
 MAX_RETRIES = 3
 MAX_TURNS = 100  # Prevent infinite games
 
-# Default opponent models for training
-DEFAULT_OPPONENT_MODELS = [
+# Default training completition models
+DEFAULT_TRAINING_MODEL_SETUP = [
     AIModel.OPENAI_GPT_5_MINI,
     AIModel.OPENAI_GPT_5_MINI,
     AIModel.OPENAI_GPT_5_MINI,
     AIModel.OPENAI_GPT_5_MINI,
+    None,
 ]
 
 # Global engine API instance
@@ -206,7 +224,6 @@ async def get_completion_with_retries(
 
     while num_retries < max_retries:
         try:
-            type_shit = str(uuid.uuid4())
             # Get LLM response with tool calling
             async with trajectory.track_duration("llm_completion"):
                 chat_completion = await get_completion_with_tools(
@@ -219,12 +236,7 @@ async def get_completion_with_retries(
 
             choice = chat_completion.choices[0]
 
-            trajectory.messages_and_choices.append(choice)
-
-            if verbose:
-                print(f"Model response: {choice.message.tool_calls}")
-
-            # Extract tool call
+            # Extract tool call FIRST (before adding to trajectory)
             tool_call_result = extract_tool_call_from_choice(choice)
 
             if tool_call_result is None:
@@ -232,23 +244,23 @@ async def get_completion_with_retries(
 
             tool_name, arguments = tool_call_result
 
+            # Only add to trajectory after we know it's valid
+            trajectory.messages_and_choices.append(choice)
+
             if verbose:
-                print(f"Tool: {tool_name}, Args: {arguments}")
+                logger.debug(f"Tool: {tool_name}, Args: {arguments}")
 
             # Success! Return the parsed tool call
             return tool_name, arguments, num_retries
 
         except openai.LengthFinishReasonError as e:
             # Model hit token limit - this is fatal, don't retry
-            if verbose:
-                print(f"Length finish reason error: {e}")
+            logger.warning(f"Token limit hit: {e}")
             raise e
 
         except Exception as e:
             num_retries += 1
-
-            if verbose:
-                print(f"Error on attempt {num_retries}/{max_retries}: {e}")
+            logger.debug(f"Retry {num_retries}/{max_retries}: {e}")
 
             if num_retries >= max_retries:
                 # Max retries exceeded - raise EngineException
@@ -441,6 +453,7 @@ async def rollout(
     verbose: bool = False,
     max_turns: int = MAX_TURNS,
     enable_thinking: bool = True,
+    trainable_fascist_prob: float = 0.6,
 ) -> art.Trajectory:
     """
     Run a single Secret Hitler game rollout.
@@ -456,6 +469,7 @@ async def rollout(
         verbose: Print debug information
         max_turns: Maximum number of turns before forcing game end
         enable_thinking: Enable internal thinking for Qwen3 models (default: True)
+        trainable_fascist_prob: Probability trainable agent gets Fascist/Hitler role (default: 0.6)
 
     Returns:
         Trajectory containing the game history and reward
@@ -465,19 +479,17 @@ async def rollout(
     
     # Initialize the game
     game_id = str(uuid.uuid4())
-    policy_ai_model = AIModel.QWEN_POLICY_AGENT
-
     # Time the engine create call
     create_start = time.perf_counter()
     model_input = await _engine_api.create(
         game_id=game_id,
         deck=Deck(),
-        opponent_models=DEFAULT_OPPONENT_MODELS,
-        policy_model=policy_ai_model,
+        ai_models=DEFAULT_TRAINING_MODEL_SETUP,
+        trainable_fascist_prob=trainable_fascist_prob,
     )
-    create_time_ms = (time.perf_counter() - create_start) * 1000
-
-    # Get the role assigned to our policy
+    trainable_role = _engine_api.get_trainable_agent_role(game_id)
+    trainable_role_value = trainable_role.value if trainable_role else None
+    trainable_is_fascist = trainable_role in {AgentRole.FASCIST, AgentRole.HITLER}
     policy_role = get_policy_role(_engine_api, game_id)
 
     trajectory = art.Trajectory(
@@ -486,21 +498,14 @@ async def rollout(
             "step": step,
             "validation": is_validation,
             "game_id": game_id,
-            "policy_role": policy_role,  # Track which role our policy is playing
+            "trainable_role": trainable_role_value,
         },
         reward=0,
         metrics={
             "num_turns": 0,
             "invalid_tool_calls": 0,
             "total_retries": 0,
-            "engine_create_time_ms": create_time_ms,
-            "engine_execute_time_ms": 0,
-            "total_engine_time_ms": create_time_ms,
-            # Discard tracking for policy agent only
-            "discard_as_president_count": 0,
-            "discard_as_president_own_card_count": 0,
-            "discard_as_chancellor_count": 0,
-            "discard_as_chancellor_own_card_count": 0,
+            "trainable_fascist_start": 1 if trainable_is_fascist else 0,
         },
         # tools=TOOLS,  # Store tool schemas in trajectory
     )
@@ -511,42 +516,29 @@ async def rollout(
     final_state_logged = False
 
     if verbose:
-        print(f"\n{'=' * 60}")
-        print(f"Starting Secret Hitler Rollout (Step {step})")
-        print(f"{'=' * 60}\n")
+        logger.info(f"Starting rollout | step={step} | game={game_id[:8]}")
+
+    # Helper to clean multi-modal content
+    def clean_msg(msg: dict) -> dict:
+        """Convert multi-modal message format to plain string format for training."""
+        msg = msg.copy()
+        content = msg.get("content", [])
+        if isinstance(content, list) and len(content) > 0:
+            if isinstance(content[0], dict) and content[0].get("type") == "text":
+                msg["content"] = content[0].get("text", "")
+        return msg
 
     # Main game loop
     while not game_over and num_turns < max_turns:
         num_turns += 1
 
-        if verbose:
-            print(f"\n--- Turn {num_turns} ---")
-            print(f"Messages to model ({len(model_input.messages)} messages)")
-
         # Add only NEW messages to trajectory (avoid duplicates)
-        def clean_msg(msg: dict) -> dict:
-            """Convert multi-modal message format to plain string format for training."""
-            msg = msg.copy()  # Don't mutate the original
-            content = msg.get("content", [])
-            if isinstance(content, list) and len(content) > 0:
-                if isinstance(content[0], dict) and content[0].get("type") == "text":
-                    # Extract JUST the text string
-                    msg["content"] = content[0].get("text", "")
-            return msg
-        
-        # Only add messages we haven't seen before
-        # Skip assistant messages since we add Choice objects directly (line 184)
+        # Skip assistant messages since we add Choice objects directly
         new_messages = model_input.messages[messages_added_count:]
         for msg in new_messages:
-            if msg.get("role") == "assistant":
-                # Skip assistant messages - we already added them as Choice objects
-                continue
-            cleaned = clean_msg(msg)
-            if verbose:
-                print(f"[uuid={game_id}] cleaned={cleaned}")
-            trajectory.messages_and_choices.append(cleaned)
+            if msg.get("role") != "assistant":
+                trajectory.messages_and_choices.append(clean_msg(msg))
         
-        # Update count to track what we've added
         messages_added_count = len(model_input.messages)
 
         # Check if we have a terminal state (game over)
@@ -555,25 +547,9 @@ async def rollout(
             terminal_state: TerminalState = model_input.terminal_state
             
             trajectory.reward = terminal_state.reward
-            trajectory.metrics["final_reward"] = terminal_state.reward  # Log reward in metrics
-            # Validate game_id matches (sanity check)
-            assert terminal_state.game_id == game_id, (
-                f"Terminal state game_id mismatch: {terminal_state.game_id} != {game_id}"
-            )
-
-            with weave.thread(thread_id=game_id):
-                log_final_trajectory_state(
-                    game_id=game_id,
-                    messages_and_choices=trajectory.messages_and_choices,
-                    reward=trajectory.reward,
-                )
-            final_state_logged = True
-
-            if verbose:
-                print(f"\n{'=' * 60}")
-                print(f"Game Over! Reward: {terminal_state.reward}")
-                print(f"Role: {policy_role}")
-                print(f"{'=' * 60}\n")
+            if terminal_state.winning_team:
+                trajectory.metadata["winning_team"] = terminal_state.winning_team
+            assert terminal_state.game_id == game_id
             break
 
         # At this point, we should have a tool_call target
@@ -614,7 +590,6 @@ async def rollout(
 
         except (openai.LengthFinishReasonError, EngineException):
             # Fatal errors - propagate up to @art.retry decorator
-            # These will trigger a full rollout retry
             raise
 
         except Exception as e:
@@ -623,11 +598,7 @@ async def rollout(
             trajectory.metrics["total_retries"] += MAX_RETRIES
             trajectory.reward = -1.0
             trajectory.metrics["failed_on_invalid_tool"] = True
-
-            if verbose:
-                print(f"Unexpected error: {e}")
-                print("Ending game with penalty.")
-
+            logger.warning(f"Game {game_id[:8]} ended with error: {e}")
             game_over = True
 
     # Record final metrics
@@ -635,22 +606,22 @@ async def rollout(
     trajectory.metrics["hit_max_turns"] = num_turns >= max_turns
 
     if num_turns >= max_turns and not game_over:
-        # Penalty for games that don't finish
         trajectory.reward = -0.5
         trajectory.metrics["forced_termination"] = True
 
-        if verbose:
-            print(
-                f"Game hit max turns ({max_turns}) without finishing. Penalty applied."
-            )
+    # Count trajectory composition
+    choice_count = sum(1 for item in trajectory.messages_and_choices if hasattr(item, 'message'))
+    msg_count = len(trajectory.messages_and_choices) - choice_count
 
-    if verbose:
-        print("\nFinal Trajectory Stats:")
-        print(f"  Role: {policy_role}")
-        print(f"  Turns: {num_turns}")
-        print(f"  Reward: {trajectory.reward}")
-        print(f"  Invalid tool calls: {trajectory.metrics['invalid_tool_calls']}")
-        print(f"  Total retries: {trajectory.metrics['total_retries']}")
+    # Determine outcome (reward=0 means trainable agent's team lost, not a draw)
+    outcome = "WIN" if trajectory.reward > 0 else "LOSS"
+
+    # Log clean game summary to console
+    logger.info(
+        f"Game {game_id[:8]} | {outcome} | "
+        f"reward={trajectory.reward:.2f} | turns={num_turns} | "
+        f"choices={choice_count} | messages={msg_count}"
+    )
 
     if not final_state_logged:
         with weave.thread(thread_id=game_id):
@@ -668,3 +639,37 @@ async def rollout(
     _analyze_discard_behavior(trajectory, policy_role)
 
     return trajectory
+
+
+# Per-game timeout (in seconds) - if a single game takes longer, it fails individually
+GAME_TIMEOUT = 20 * 60  # 20 minutes per game
+
+
+async def rollout_with_timeout(
+    model: art.Model,
+    step: int,
+    is_validation: bool,
+    verbose: bool = False,
+    max_turns: int = MAX_TURNS,
+    enable_thinking: bool = True,
+    trainable_fascist_prob: float = 0.6,
+    game_timeout: int = GAME_TIMEOUT,
+) -> art.Trajectory:
+    """
+    Wrapper around rollout that adds a per-game timeout.
+    
+    If a game takes longer than game_timeout, it raises asyncio.TimeoutError
+    which ART's gather will count as an exception (not losing other games).
+    """
+    return await asyncio.wait_for(
+        rollout(
+            model=model,
+            step=step,
+            is_validation=is_validation,
+            verbose=verbose,
+            max_turns=max_turns,
+            enable_thinking=enable_thinking,
+            trainable_fascist_prob=trainable_fascist_prob,
+        ),
+        timeout=game_timeout,
+    )

@@ -138,7 +138,7 @@ class AgentRole(str, Enum):
 class Agent(BaseModel):
     agent_id: str
     role: AgentRole
-    ai_model: AIModel
+    ai_model: AIModel | None = None
     is_policy: bool = False
 
 

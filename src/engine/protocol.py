@@ -11,11 +11,13 @@ class TerminalState(BaseModel):
         game_id: Unique identifier for the game
         winners: List of agents who won the game
         reward: Final reward value (based on win/loss)
+        winning_team: Which team won the game ("liberal" or "fascist")
     """
 
     game_id: str
     winners: list[Agent]
     reward: float
+    winning_team: str | None = None
 
 
 class ToolCallTarget(BaseModel):

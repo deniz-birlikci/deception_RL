@@ -103,7 +103,7 @@ async def api_start_game(game_id: str) -> Dict[str, Any]:
     print(f"DEBUG: User clicked 'Start Game' for {game_id}")
     
     # NOW create and start the actual game
-    ai_models = [AIModel.OPENAI_GPT_5] * 5  # All AI players
+    ai_models = [AIModel.OPENAI_GPT_5_MINI] * 5  # All AI players
     
     await _api.create(
         game_id=_game_id,

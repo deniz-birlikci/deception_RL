@@ -42,14 +42,10 @@ class RolloutConfig:
     verbose: bool = False
     """Print debug information during rollouts."""
 
-    enable_oversampling: bool = False
-    """Enable oversampling mode to keep engine busy with high concurrency."""
-
-    oversampling_concurrency: int = 50
-    """Number of concurrent rollouts when oversampling is enabled."""
-
-    oversampling_timeout_seconds: float = 300.0
-    """Global timeout in seconds for oversampling. Rollouts exceeding this are abandoned."""
+    trainable_fascist_prob: float = 0.6
+    """Probability the trainable agent is assigned Fascist/Hitler role (0.0-1.0).
+    Default 0.6 means 60% chance of being Fascist team, vs 40% uniform (which gives ~24% Fascist team).
+    Set to 0.4 for uniform distribution (since Fascist team is 2/5 = 40% naturally)."""
 
 
 @dataclass
@@ -76,6 +72,17 @@ class TrainLoopConfig:
 
 
 @dataclass
+class CheckpointConfig:
+    """Configuration for checkpoint handling."""
+
+    mode: str = "latest"
+    """Options: 'latest' (resume), 'scratch' (delete existing), 'specific' (resume from checkpoint.step)."""
+
+    step: int | None = None
+    """Checkpoint step to resume from when mode='specific'."""
+
+
+@dataclass
 class TrainingConfig:
     """Top-level training configuration."""
 
@@ -87,3 +94,6 @@ class TrainingConfig:
 
     train: TrainLoopConfig = field(default_factory=TrainLoopConfig)
     """Training loop configuration (steps, learning_rate, etc)."""
+
+    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    """Checkpoint handling configuration."""

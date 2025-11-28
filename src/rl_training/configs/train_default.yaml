@@ -4,22 +4,20 @@
 #   modal run src/rl_training/train_modal.py --config configs/train_default.yaml
 
 model:
-  name: "ref-os30-gpt5mini-qwen2.5-7b"
+  name: "secret-hitler-v16"
   project: "secret-hitler"
   base_model: "Qwen/Qwen2.5-7B-Instruct"
 
 rollout:
   max_turns: 100
   max_retries: 3
-  simultaneous_games: 2
+  simultaneous_games: 8
   enable_thinking: true
   verbose: false
-  enable_oversampling: true
-  oversampling_concurrency: 75
-  oversampling_timeout_seconds: 900 # 15 minutes
+  trainable_fascist_prob: 0.9  # 90% chance trainable agent is Fascist/Hitler
 
 train:
-  train_steps: 40
+  train_steps: 100
   learning_rate: 1e-5
   random_seed: 42
 
@@ -28,3 +26,6 @@ train:
   gpu_memory_utilization: 0.7
   tensor_parallel_size: 1
 
+checkpoint:
+  mode: "latest"  # options: latest, scratch, specific
+  step: null      # set to step number when mode == "specific"

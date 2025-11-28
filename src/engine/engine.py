@@ -66,11 +66,12 @@ class Engine:
     def __init__(
         self,
         deck: Deck,
-        agents: list[Agent],
+        ai_models: list[AIModel | None],
         fascist_policies_to_win: int,
         liberal_policies_to_win: int,
         game_id: str,
         log_file: str | None = None,
+        trainable_fascist_prob: float = 0.6,  # Probability trainable agent is Fascist/Hitler
     ) -> None:
         self.deck = deck
         self.fascist_policies_to_win = fascist_policies_to_win
@@ -79,16 +80,62 @@ class Engine:
         self.game_id = game_id
         self.log_file = log_file
 
-        assert len(agents) == len(ROLES)
+        if len(ai_models) != len(ROLES):
+            raise ValueError(
+                f"Expected {len(ROLES)} models (including optional trainable slot), got {len(ai_models)}"
+            )
+
+        # Track trainable agent metadata
+        self.trainable_agent_id: str | None = None
+        self.trainable_agent_role: AgentRole | None = None
+        self.policy_agent_id: str | None = None
+
+        # Find trainable/policy agent index (ai_model=None marks the trainable policy)
+        trainable_idx = next((i for i, model in enumerate(ai_models) if model is None), None)
+
+        # Assign roles with optional oversampling for trainable agent
+        if trainable_idx is not None and random.random() < trainable_fascist_prob:
+            # Force trainable agent to be Fascist or Hitler
+            fascist_roles = [AgentRole.HITLER, AgentRole.FASCIST]
+            trainable_role = random.choice(fascist_roles)
+            
+            # Remaining roles for other agents
+            remaining_roles = list(ROLES)
+            remaining_roles.remove(trainable_role)
+            random.shuffle(remaining_roles)
+            
+            # Build role assignment
+            shuffled_roles = []
+            remaining_idx = 0
+            for i in range(len(ai_models)):
+                if i == trainable_idx:
+                    shuffled_roles.append(trainable_role)
+                else:
+                    shuffled_roles.append(remaining_roles[remaining_idx])
+                    remaining_idx += 1
+        else:
+            # Standard uniform shuffle
+            shuffled_roles = random.sample(ROLES, len(ROLES))
+
+        agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
+        agents = []
+        for idx, (aid, role, model) in enumerate(zip(agent_ids, shuffled_roles, ai_models)):
+            is_policy = idx == trainable_idx
+        agents.append(
+            Agent(
+                agent_id=aid,
+                role=role,
+                ai_model=model,
+                is_policy=is_policy,
+            )
+        )
+        if is_policy:
+            self.trainable_agent_id = aid
+            self.trainable_agent_role = role
+            self.policy_agent_id = aid
 
         self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
-        
-        # Find the policy agent
-        policy_agents = [a for a in agents if a.is_policy]
-        assert len(policy_agents) == 1, f"Expected exactly 1 policy agent, found {len(policy_agents)}"
-        self.policy_agent_id = policy_agents[0].agent_id
-        
-        agent_ids = [a.agent_id for a in agents]
+
         self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
         self.current_president_idx: int = 0
         self.current_chancellor_id: str | None = None
@@ -106,12 +153,35 @@ class Engine:
         }
         system_prompt = self._build_system_prompt()
 
+        # Dedicated renderer to convert policy agent history to OpenAI format
+        self._policy_message_renderer: BaseAgent | None = None
+        if self.policy_agent_id is not None:
+            self._policy_message_renderer = AgentRegistry.create_agent(
+                backend=Backend.OPENAI,
+                agent=Agent(
+                    agent_id="policy-renderer",
+                    role=AgentRole.LIBERAL,
+                    ai_model=AIModel.OPENAI_GPT_5_NANO,
+                ),
+                ai_model=AIModel.OPENAI_GPT_5_NANO,
+            )
+
         for aid, agent in self.agents_by_id.items():
+            if agent.is_policy:
+                # Still track history but inference handled externally
+                self.msg_history[aid].append(
+                    UserInput(
+                        history_type="user-input",
+                        user_message=system_prompt,
+                        timestamp=str(uuid.uuid4()),
+                    )
+                )
+                continue
+
             backend = get_backend_for_model(agent.ai_model)
             self.ai_agents[aid] = AgentRegistry.create_agent(
                 backend=backend, agent=agent, ai_model=agent.ai_model
             )
-            # initialize with system prompt
             self.msg_history[aid].append(
                 UserInput(
                     history_type="user-input",
@@ -121,15 +191,24 @@ class Engine:
             )
 
     def _generate_terminal_state(self) -> TerminalState:
-        # Check if the policy agent won
         winners = self._get_winners()
-        policy_agent = self.agents_by_id[self.policy_agent_id]
-        policy_won = policy_agent in winners
+
+        trainable_winners = [agent for agent in winners if agent.ai_model is None]
+        reward = 1.0 if trainable_winners else 0.0
+
+        winning_team = None
+        if winners:
+            first_role = winners[0].role
+            if first_role == AgentRole.LIBERAL:
+                winning_team = "liberal"
+            else:
+                winning_team = "fascist"
 
         return TerminalState(
             game_id=self.game_id,
-            reward=1.0 if policy_won else 0.0,
-            winners=[policy_agent] if policy_won else [],
+            reward=reward,
+            winners=winners,
+            winning_team=winning_team,
         )
 
     async def run(self, input_queue: Queue, output_queue: Queue) -> None:
@@ -282,9 +361,13 @@ class Engine:
         terminal_state = self._generate_terminal_state()
         
         # Get the policy agent's final message history
-        policy_agent = self.ai_agents[self.policy_agent_id]
-        policy_message_history = self.msg_history[self.policy_agent_id]
-        final_messages = policy_agent._convert_message_history(policy_message_history)
+        if self.policy_agent_id is not None and self._policy_message_renderer is not None:
+            policy_message_history = self.msg_history[self.policy_agent_id]
+            final_messages = self._policy_message_renderer._convert_message_history(
+                policy_message_history
+            )
+        else:
+            final_messages = []
         
         final_model_input = ModelInput(
             messages=final_messages,
@@ -310,7 +393,7 @@ class Engine:
         for user_input in new_user_inputs:
             self.msg_history[agent_id].append(user_input)
 
-        if agent_id == self.policy_agent_id:
+        if self.policy_agent_id is not None and agent_id == self.policy_agent_id:
             # This is the policy agent being trained - get external input
             tool_schema = generate_tools(allowed_tools, eligible_agent_ids)
             assert len(tool_schema) == 1
@@ -327,9 +410,11 @@ class Engine:
                 openai_schema=tool_schema,
             )
 
-            # Convert message history to messages using the policy agent's message renderer
+            # Convert message history to messages for the policy agent
             message_history = self.msg_history[agent_id]
-            messages = self.ai_agents[agent_id]._convert_message_history(message_history)
+            messages = self._policy_message_renderer._convert_message_history(
+                message_history
+            )
 
             model_input = ModelInput(
                 messages=messages,
@@ -366,18 +451,45 @@ class Engine:
         return response.hydrated_tool_calls[0]
 
     async def _discourse(self, input_queue: Queue, output_queue: Queue) -> None:
-        # Parallelize asking all agents if they want to speak
-        ask_tasks = [
-            self._get_tool(
-                aid,
+        # Parallelize AI agents, but handle trainable agent outside gather to avoid deadlock
+        ai_tasks = []
+        trainable_aid = None
+
+        for aid in self.agents_by_id:
+            if self.agents_by_id[aid].ai_model is None:
+                trainable_aid = aid
+            else:
+                ai_tasks.append(self._get_tool(
+                    aid,
+                    "Speak? (question/statement or null)",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["ask-agent-if-wants-to-speak"],
+                ))
+
+        # Get AI agent responses in parallel
+        ai_tools = await asyncio.gather(*ai_tasks)
+
+        # Get trainable agent response separately
+        trainable_tool = None
+        if trainable_aid:
+            trainable_tool = await self._get_tool(
+                trainable_aid,
                 "Speak? (question/statement or null)",
                 input_queue,
                 output_queue,
                 allowed_tools=["ask-agent-if-wants-to-speak"],
             )
-            for aid in self.agents_by_id
-        ]
-        tools = await asyncio.gather(*ask_tasks)
+
+        # Reconstruct tools in original order
+        tools = []
+        ai_idx = 0
+        for aid in self.agents_by_id:
+            if aid == trainable_aid:
+                tools.append(trainable_tool)
+            else:
+                tools.append(ai_tools[ai_idx])
+                ai_idx += 1
 
         speakers = []
         for aid, tool in zip(self.agents_by_id.keys(), tools):
@@ -439,18 +551,45 @@ class Engine:
     async def _vote(
         self, chancellor_id: str, input_queue: Queue, output_queue: Queue
     ) -> bool:
-        # Parallelize all votes
-        vote_tasks = [
-            self._get_tool(
-                aid,
+        # Parallelize AI agents, but handle trainable agent outside gather to avoid deadlock
+        ai_tasks = []
+        trainable_aid = None
+
+        for aid in self.agents_by_id:
+            if self.agents_by_id[aid].ai_model is None:
+                trainable_aid = aid
+            else:
+                ai_tasks.append(self._get_tool(
+                    aid,
+                    f"Vote on Chancellor {chancellor_id}? (true/false)",
+                    input_queue,
+                    output_queue,
+                    allowed_tools=["vote-chancellor-yes-no"],
+                ))
+
+        # Get AI agent responses in parallel
+        ai_tools = await asyncio.gather(*ai_tasks)
+
+        # Get trainable agent response separately
+        trainable_tool = None
+        if trainable_aid:
+            trainable_tool = await self._get_tool(
+                trainable_aid,
                 f"Vote on Chancellor {chancellor_id}? (true/false)",
                 input_queue,
                 output_queue,
                 allowed_tools=["vote-chancellor-yes-no"],
             )
-            for aid in self.agents_by_id
-        ]
-        tools = await asyncio.gather(*vote_tasks)
+
+        # Reconstruct tools in original order
+        tools = []
+        ai_idx = 0
+        for aid in self.agents_by_id:
+            if aid == trainable_aid:
+                tools.append(trainable_tool)
+            else:
+                tools.append(ai_tools[ai_idx])
+                ai_idx += 1
 
         votes = []
         for aid, tool in zip(self.agents_by_id.keys(), tools):

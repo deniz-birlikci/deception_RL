@@ -11,20 +11,19 @@ async def main():
 
     deck = Deck()
 
-    opponent_models = [
-        AIModel.OPENAI_GPT_5,
-        AIModel.OPENAI_GPT_5,
-        AIModel.OPENAI_GPT_5,
-        AIModel.OPENAI_GPT_5,
-        AIModel.OPENAI_GPT_5,
+    ai_models: list[AIModel | None] = [
+        AIModel.OPENAI_GPT_5_MINI,
+        AIModel.OPENAI_GPT_5_MINI,
+        AIModel.OPENAI_GPT_5_MINI,
+        AIModel.OPENAI_GPT_5_MINI,
+        None,  # Treat last slot as the human/policy player
     ]
 
     game_id = str(uuid.uuid4())
     result = await api.create(
         game_id=game_id,
         deck=deck,
-        opponent_models=opponent_models,
-        policy_model=None,
+        ai_models=ai_models,
         log_file="game_log.txt"
     )
 

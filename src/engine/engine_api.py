@@ -1,18 +1,18 @@
 import asyncio
-import random
 import traceback
 from asyncio import Queue
 from typing import Dict
-from src.models import AIModel, Agent, AgentRole
-from src.engine.engine import Engine, ROLES
+from src.models import AIModel, AgentRole
+from src.engine.engine import Engine
 from src.engine.deck import Deck
 from src.engine.protocol import ModelInput, ModelOutput, TerminalState
 
-DEFAULT_OPPONENT_MODELS: list[AIModel] = [
-    AIModel.OPENAI_GPT_5,
+DEFAULT_AI_MODELS = [
     AIModel.OPENAI_GPT_5_MINI,
-    AIModel.OPENAI_GPT_5_NANO,
-    AIModel.OPENAI_GPT_4_1,
+    AIModel.OPENAI_GPT_5_MINI,
+    AIModel.OPENAI_GPT_5_MINI,
+    AIModel.OPENAI_GPT_5_MINI,
+    None,
 ]
 
 
@@ -26,42 +26,25 @@ class EngineAPI:
         self,
         game_id: str,
         deck: Deck,
-        opponent_models: list[AIModel] = DEFAULT_OPPONENT_MODELS,
-        policy_model: AIModel | None = None,
-        fascist_policies_to_win: int = 4,
+        ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
+        fascist_policies_to_win: int = 2,
         liberal_policies_to_win: int = 3,
         log_file: str | None = None,
+        trainable_fascist_prob: float = 0.6,
     ) -> ModelInput:
         input_queue: Queue = Queue()
         output_queue: Queue = Queue()
 
         self.games[game_id] = (input_queue, output_queue)
-        
-        # Create agents with random role assignment
-        shuffled_roles = random.sample(ROLES, len(ROLES))
-        agent_ids = [f"agent_{i}" for i in range(len(ROLES))]
-        
-        # All opponents + policy agent
-        all_models = opponent_models + ([policy_model] if policy_model else [])
-        assert len(all_models) == len(ROLES)
-        
-        agents = [
-            Agent(
-                agent_id=aid,
-                role=role,
-                ai_model=model,
-                is_policy=(policy_model is not None and i == len(opponent_models))  # Last agent is policy
-            )
-            for i, (aid, role, model) in enumerate(zip(agent_ids, shuffled_roles, all_models))
-        ]
 
         engine = Engine(
             deck=deck,
-            agents=agents,
+            ai_models=ai_models,
             fascist_policies_to_win=fascist_policies_to_win,
             liberal_policies_to_win=liberal_policies_to_win,
             game_id=game_id,
             log_file=log_file,
+            trainable_fascist_prob=trainable_fascist_prob,
         )
         self.engines[game_id] = engine
 
@@ -120,6 +103,12 @@ class EngineAPI:
 
     def game_exists(self, game_id: str) -> bool:
         return game_id in self.games
+
+    def get_trainable_agent_role(self, game_id: str) -> AgentRole | None:
+        engine = self.engines.get(game_id)
+        if engine is None:
+            return None
+        return getattr(engine, "trainable_agent_role", None)
 
     def finalize(self, game_id: str, terminal_state: TerminalState) -> None:
         pass
