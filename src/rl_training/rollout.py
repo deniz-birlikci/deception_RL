@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
@@ -506,6 +508,8 @@ async def rollout(
             "invalid_tool_calls": 0,
             "total_retries": 0,
             "trainable_fascist_start": 1 if trainable_is_fascist else 0,
+            "engine_execute_time_ms": 0.0,
+            "total_engine_time_ms": 0.0,
         },
         # tools=TOOLS,  # Store tool schemas in trajectory
     )

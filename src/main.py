@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from src.engine.engine_api import EngineAPI
 from src.engine.deck import Deck
 from src.models import AIModel

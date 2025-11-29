@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import math
 import os
@@ -11,6 +13,7 @@ from omegaconf import OmegaConf
 
 import art
 from art.utils.output_dirs import get_model_dir
+import weave
 
 # Create Modal app
 app = modal.App("SecretHitler-training")
@@ -206,10 +209,12 @@ async def train(config_dict: dict):
     print(OmegaConf.to_yaml(config))
     print("=" * 50)
 
+    experiment_name = config.model.name
+
     # Initialize W&B for logging
     wandb.init(
         project=config.model.project,
-        name=config.model.name,
+        name=experiment_name,
         config=OmegaConf.to_container(config, resolve=True),
         reinit=True,
     )
@@ -299,7 +304,14 @@ async def train(config_dict: dict):
     # Each game has a 5-min timeout (in rollout_with_timeout), so stalled games fail individually
     # This means we keep completed games even if some timeout!
     
-    for i in range(await model.get_step(), config.train.train_steps):
+    current_step = await model.get_step()
+    if config.checkpoint.mode.lower() == "specific" and config.checkpoint.step is not None:
+        initial_step = config.checkpoint.step
+        if current_step < initial_step:
+            current_step = initial_step
+            print(f"Overriding start step to {initial_step} based on checkpoint config.")
+
+    for i in range(current_step, config.train.train_steps):
         print(f"Starting training step {i}/{config.train.train_steps}")
 
         # Per-game timeouts mean stalled games fail individually, keeping completed ones
@@ -394,9 +406,11 @@ async def train(config_dict: dict):
 
         # Compute and log role-based metrics for all trajectories
         role_metrics = compute_role_based_metrics(train_groups)
-        if role_metrics:
-            wandb.log(role_metrics, step=i)
-            print(f"Role-based metrics logged: {len(role_metrics)} metrics")
+        oversample_metrics = compute_oversampling_role_metrics(train_groups)
+        combined_metrics = {**role_metrics, **oversample_metrics}
+        if combined_metrics:
+            wandb.log(combined_metrics, step=i)
+            print(f"Role-based metrics logged: {len(combined_metrics)} metrics")
 
         await model.train(
             train_groups,

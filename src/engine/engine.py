@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import random
 import uuid
@@ -55,10 +57,8 @@ def get_backend_for_model(ai_model: AIModel | None) -> Backend:
         ai_model: The AI model to check
         
     Returns:
-        Backend.QWEN for Qwen models, Backend.OPENAI otherwise
+        Backend.OPENAI for all models (Qwen handled via OpenAI-compatible backend)
     """
-    if ai_model and "qwen" in ai_model.value.lower():
-        return Backend.QWEN
     return Backend.OPENAI
 
 
@@ -121,18 +121,17 @@ class Engine:
         agents = []
         for idx, (aid, role, model) in enumerate(zip(agent_ids, shuffled_roles, ai_models)):
             is_policy = idx == trainable_idx
-        agents.append(
-            Agent(
+            agent = Agent(
                 agent_id=aid,
                 role=role,
                 ai_model=model,
                 is_policy=is_policy,
             )
-        )
-        if is_policy:
-            self.trainable_agent_id = aid
-            self.trainable_agent_role = role
-            self.policy_agent_id = aid
+            agents.append(agent)
+            if is_policy:
+                self.trainable_agent_id = aid
+                self.trainable_agent_role = role
+                self.policy_agent_id = aid
 
         self.agents_by_id: dict[str, Agent] = {a.agent_id: a for a in agents}
 

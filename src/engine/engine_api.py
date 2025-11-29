@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import traceback
 from asyncio import Queue
@@ -27,7 +29,7 @@ class EngineAPI:
         game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
-        fascist_policies_to_win: int = 2,
+        fascist_policies_to_win: int = 3,
         liberal_policies_to_win: int = 3,
         log_file: str | None = None,
         trainable_fascist_prob: float = 0.6,

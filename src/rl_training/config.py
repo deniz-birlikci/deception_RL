@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Training configuration using OmegaConf with dataclass support.
 

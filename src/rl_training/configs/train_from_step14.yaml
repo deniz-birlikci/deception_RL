@@ -1,0 +1,29 @@
+# Training config to resume secret-hitler-v16 from checkpoint step 14
+
+model:
+  name: "secret-hitler-v17"
+  project: "secret-hitler"
+  base_model: "Qwen/Qwen2.5-7B-Instruct"
+
+rollout:
+  max_turns: 100
+  max_retries: 3
+  simultaneous_games: 8
+  enable_thinking: true
+  verbose: false
+  trainable_fascist_prob: 1
+
+train:
+  train_steps: 100
+  learning_rate: 1e-5
+  random_seed: 42
+  max_seq_length: 32768
+  gpu_memory_utilization: 0.7
+  tensor_parallel_size: 1
+
+# checkpoint:
+#   mode: "specific"
+#   step: 50
+
+checkpoint:
+  mode: "scratch"
