@@ -3,7 +3,7 @@ from __future__ import annotations
 """
 Training configuration using OmegaConf with dataclass support.
 
-Provides structured, typed configuration for Secret Hitler RL training.
+Provides structured, typed configuration for Secret Impostor RL training.
 """
 
 from dataclasses import dataclass, field
@@ -16,10 +16,10 @@ class ModelConfig:
     """Model configuration."""
 
     name: str = MISSING
-    """Name of the model (e.g., 'secret-hitler-v1')."""
+    """Name of the model (e.g., 'secret-impostor-v1')."""
 
     project: str = MISSING
-    """Project name for logging and organization (e.g., 'secret-hitler')."""
+    """Project name for logging and organization (e.g., 'secret-impostor')."""
 
     base_model: str = MISSING
     """Base model to fine-tune (e.g., 'Qwen/Qwen2.5-3B-Instruct')."""
@@ -44,10 +44,10 @@ class RolloutConfig:
     verbose: bool = False
     """Print debug information during rollouts."""
 
-    trainable_fascist_prob: float = 0.6
-    """Probability the trainable agent is assigned Fascist/Hitler role (0.0-1.0).
-    Default 0.6 means 60% chance of being Fascist team, vs 40% uniform (which gives ~24% Fascist team).
-    Set to 0.4 for uniform distribution (since Fascist team is 2/5 = 40% naturally)."""
+    trainable_impostor_prob: float = 0.6
+    """Probability the trainable agent is assigned Impostor/Master Impostor role (0.0-1.0).
+    Default 0.6 means 60% chance of being on the Impostor team, vs 40% uniform (which gives ~24% Impostor team).
+    Set to 0.4 for uniform distribution (since the Impostor team is 2/5 = 40% naturally)."""
 
 
 @dataclass

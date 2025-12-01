@@ -292,7 +292,7 @@ def get_policy_role(engine_api: EngineAPI, game_id: str) -> str | None:
     Get the role assigned to the policy being trained.
     
     Returns:
-        Role name ("liberal", "fascist", or "hitler"), or None if not found
+        Role name ("crewmate", "impostor", or "master_impostor"), or None if not found
     """
     engine = engine_api.engines.get(game_id)
     if not engine:
@@ -311,19 +311,19 @@ def _analyze_discard_behavior(trajectory: art.Trajectory, policy_role: str | Non
     Analyze the policy agent's discard behavior during the game.
     
     Tracks when the policy agent discards their own team's cards when they have
-    both liberal and fascist cards available (strategic discard).
+    both crewmate and impostor cards available (strategic discard).
     
     Args:
         trajectory: The completed trajectory
-        policy_role: The role assigned to the policy agent (liberal/fascist/hitler)
+        policy_role: The role assigned to the policy agent (crewmate/impostor/master impostor)
     """
     if policy_role is None:
         return
     
     # Determine which card type is "own" for this role
-    # Liberal discards liberal = own card
-    # Fascist/Hitler discards fascist = own card
-    own_card_type = "liberal" if policy_role == "liberal" else "fascist"
+    # Crewmate discards Security = own card
+    # Impostor/Master Impostor discards Sabotage = own card
+    own_card_type = "security" if policy_role == "crewmate" else "sabotage"
     
     messages_and_choices = trajectory.messages_and_choices
     
@@ -342,7 +342,7 @@ def _analyze_discard_behavior(trajectory: art.Trajectory, policy_role: str | Non
                 if cards is not None and discard_idx is not None and len(cards) == 3:
                     trajectory.metrics["discard_as_president_count"] += 1
                     # Check if both card types are available
-                    if "liberal" in cards and "fascist" in cards:
+                    if "security" in cards and "sabotage" in cards:
                         discarded_card = cards[discard_idx]
                         if discarded_card == own_card_type:
                             trajectory.metrics["discard_as_president_own_card_count"] += 1
@@ -353,7 +353,7 @@ def _analyze_discard_behavior(trajectory: art.Trajectory, policy_role: str | Non
                 if cards is not None and play_idx is not None and len(cards) == 2:
                     trajectory.metrics["discard_as_chancellor_count"] += 1
                     # Check if both card types are available
-                    if "liberal" in cards and "fascist" in cards:
+                    if "security" in cards and "sabotage" in cards:
                         # Chancellor discards the card they DON'T play
                         discard_idx = 1 - play_idx
                         discarded_card = cards[discard_idx]
@@ -382,19 +382,19 @@ def _parse_discard_action(
     content = user_msg.get("content", "")
     
     # Extract cards from the prompt
-    # Format: "Cards: [PolicyCard.LIBERAL, PolicyCard.FASCIST, ...]"
+    # Format: "Cards: [PolicyCard.SECURITY, PolicyCard.SABOTAGE, ...]"
     cards_match = re.search(r"Cards: \[(.*?)\]", content)
     if not cards_match:
         return None, None
     
     cards_str = cards_match.group(1)
-    # Parse card types - extract just "liberal" or "fascist"
+    # Parse card types - extract just "security" or "sabotage"
     cards = []
     for card in cards_str.split(","):
-        if "LIBERAL" in card.upper():
-            cards.append("liberal")
-        elif "FASCIST" in card.upper():
-            cards.append("fascist")
+        if "SECURITY" in card.upper():
+            cards.append("security")
+        elif "SABOTAGE" in card.upper():
+            cards.append("sabotage")
     
     if not cards:
         return None, None
@@ -455,10 +455,10 @@ async def rollout(
     verbose: bool = False,
     max_turns: int = MAX_TURNS,
     enable_thinking: bool = True,
-    trainable_fascist_prob: float = 0.6,
+    trainable_impostor_prob: float = 0.6,
 ) -> art.Trajectory:
     """
-    Run a single Secret Hitler game rollout.
+    Run a single Secret Impostor game rollout.
 
     The model plays all 5 agents in the game. Each agent gets appropriate
     context (role, private info, public events) and must use tool calling
@@ -471,7 +471,7 @@ async def rollout(
         verbose: Print debug information
         max_turns: Maximum number of turns before forcing game end
         enable_thinking: Enable internal thinking for Qwen3 models (default: True)
-        trainable_fascist_prob: Probability trainable agent gets Fascist/Hitler role (default: 0.6)
+        trainable_impostor_prob: Probability trainable agent gets Impostor/Master Impostor role (default: 0.6)
 
     Returns:
         Trajectory containing the game history and reward
@@ -487,11 +487,11 @@ async def rollout(
         game_id=game_id,
         deck=Deck(),
         ai_models=DEFAULT_TRAINING_MODEL_SETUP,
-        trainable_fascist_prob=trainable_fascist_prob,
+        trainable_impostor_prob=trainable_impostor_prob,
     )
     trainable_role = _engine_api.get_trainable_agent_role(game_id)
     trainable_role_value = trainable_role.value if trainable_role else None
-    trainable_is_fascist = trainable_role in {AgentRole.FASCIST, AgentRole.HITLER}
+    trainable_is_impostor = trainable_role in {AgentRole.IMPOSTOR, AgentRole.MASTER_IMPOSTOR}
     policy_role = get_policy_role(_engine_api, game_id)
 
     trajectory = art.Trajectory(
@@ -507,7 +507,7 @@ async def rollout(
             "num_turns": 0,
             "invalid_tool_calls": 0,
             "total_retries": 0,
-            "trainable_fascist_start": 1 if trainable_is_fascist else 0,
+            "trainable_impostor_start": 1 if trainable_is_impostor else 0,
             "engine_execute_time_ms": 0.0,
             "total_engine_time_ms": 0.0,
         },
@@ -656,7 +656,7 @@ async def rollout_with_timeout(
     verbose: bool = False,
     max_turns: int = MAX_TURNS,
     enable_thinking: bool = True,
-    trainable_fascist_prob: float = 0.6,
+    trainable_impostor_prob: float = 0.6,
     game_timeout: int = GAME_TIMEOUT,
 ) -> art.Trajectory:
     """
@@ -673,7 +673,7 @@ async def rollout_with_timeout(
             verbose=verbose,
             max_turns=max_turns,
             enable_thinking=enable_thinking,
-            trainable_fascist_prob=trainable_fascist_prob,
+            trainable_impostor_prob=trainable_impostor_prob,
         ),
         timeout=game_timeout,
     )

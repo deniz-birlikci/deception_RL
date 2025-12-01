@@ -89,7 +89,7 @@ def generate_tools(
             "type": "function",
             "function": {
                 "name": "choose-agent-to-vote-out",
-                "description": "As President with executive power, choose a player to execute (remove from the game). Provide the agent_id of the player you want to eliminate, or null if you choose not to use this power (if allowed by game rules). Executed players are revealed and removed from the game permanently. Use this power to eliminate suspected fascists or to create confusion and mistrust among liberals.",
+                "description": "As President with executive power, choose a player to execute (remove from the game). Provide the agent_id of the player you want to eliminate, or null if you choose not to use this power (if allowed by game rules). Executed players are revealed and removed from the game permanently. Use this power to eliminate suspected impostors or to create confusion and mistrust among crewmates.",
                 "strict": True,
                 "parameters": {
                     "type": "object",

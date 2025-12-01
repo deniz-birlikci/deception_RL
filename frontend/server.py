@@ -21,7 +21,7 @@ from src.engine.deck import Deck
 from src.models import AIModel, AskAgentIfWantsToSpeakEventPublic, AgentResponseToQuestioningEventPublic, ChancellorPlayPolicyEventPublic, VoteChancellorYesNoEventPublic, ChooseAgentToVoteOutEventPublic, PresidentPickChancellorEventPublic
 
 # FastAPI app setup
-app = FastAPI(title="Secret Hitler LLM API", version="0.1.0")
+app = FastAPI(title="Secret Impostor LLM API", version="0.1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*", "null"],
@@ -201,10 +201,11 @@ def api_state(game_id: str) -> Dict[str, Any]:
         if is_president: title_parts.append("President")
         if is_chancellor: title_parts.append("Chancellor")
         
+        role_label = agent.role.value.replace("_", " ").title()
         players.append({
             "id": agent_id,
             "name": names[i],
-            "role": f"({agent.role.value.title()})",
+            "role": f"({role_label})",
             "title": " & ".join(title_parts),
             "is_you": False,  # All AI players
             "model": agent.ai_model
@@ -213,10 +214,10 @@ def api_state(game_id: str) -> Dict[str, Any]:
     return {
         "ok": True,
         "game_id": actual_game_id,
-        "liberal_policies": engine.liberal_policies_played,
-        "fascist_policies": engine.fascist_policies_played,
-        "liberal_policies_to_win": engine.liberal_policies_to_win,
-        "fascist_policies_to_win": engine.fascist_policies_to_win,
+        "security_progress": engine.security_progress,
+        "sabotage_progress": engine.sabotage_progress,
+        "security_target": engine.security_track_target,
+        "sabotage_target": engine.sabotage_track_target,
         "events": events,
         "players": players,
     }

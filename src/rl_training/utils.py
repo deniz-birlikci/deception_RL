@@ -9,19 +9,19 @@ class TerminalState(BaseModel):
     Attributes:
         game_id: Unique identifier for the game
         reward: Final reward value (based on win/loss)
-        winner: Which team won ('liberal' or 'fascist')
-        liberal_policies_played: Number of liberal policies enacted
-        fascist_policies_played: Number of fascist policies enacted
-        hitler_elected: Whether Hitler was elected as chancellor with 3+ fascist policies
+        winner: Which team won ('crewmate' or 'impostor')
+        security_protocols_resolved: Number of security protocols completed
+        sabotage_protocols_completed: Number of sabotage protocols completed
+        master_impostor_elected: Whether the Master Impostor was promoted after enough sabotages
         num_executions: Number of players executed during the game
     """
 
     game_id: str
     reward: float
     winner: str | None = None
-    liberal_policies_played: int = 0
-    fascist_policies_played: int = 0
-    hitler_elected: bool = False
+    security_protocols_resolved: int = 0
+    sabotage_protocols_completed: int = 0
+    master_impostor_elected: bool = False
     num_executions: int = 0
 
 
@@ -50,11 +50,11 @@ class ModelInput(BaseModel):
 
 async def create_game() -> ModelInput:
     """
-    Create a new Secret Hitler game and return the initial game state.
+    Create a new Secret Impostor game and return the initial game state.
 
     This function should:
     1. Initialize a new game with 5 agents
-    2. Assign roles (Liberal, Fascist, Hitler)
+    2. Assign roles (Crewmate, Impostor, Master Impostor)
     3. Determine the first president
     4. Build initial messages for the first agent to act
     5. Return ModelInput with initial state
@@ -66,11 +66,11 @@ async def create_game() -> ModelInput:
     [
         {
             "role": "system",
-            "content": "You are Agent <agent_id> playing Secret Hitler. Your role is <role>. ..."
+            "content": "You are Agent <agent_id> playing Secret Impostor. Your role is <role>. ..."
         },
         {
             "role": "user",
-            "content": "Game State:\\nLiberal Policies: 0\\nFascist Policies: 0\\n...\\n\\nYou are the President. Choose a Chancellor."
+            "content": "Game State:\\nCrewmate Policies: 0\\nImpostor Policies: 0\\n...\\n\\nYou are the President. Choose a Chancellor."
         }
     ]
     """
@@ -111,8 +111,8 @@ async def execute_action(tool_call_json: str) -> ModelInput:
           messages=[],  # Can be empty since game is over
           terminal_state=TerminalState(
               game_id="...",
-              reward=1.0,  # +1 for liberal win, -1 for fascist win
-              winner="liberal",
+              reward=1.0,  # +1 for crewmate win, -1 for impostor win
+              winner="crewmate",
               ...
           )
       )

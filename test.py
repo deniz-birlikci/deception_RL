@@ -13,16 +13,16 @@ def test_gpt5_model():
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     test_prompt = """
-    You are playing Secret Hitler, a social deduction game. You've been assigned the role of a Liberal.
+    You are playing Secret Impostor, a social deduction game. You've been assigned the role of a Crewmate.
     
     The current situation:
     - 5 players total
-    - 2 fascist policies and 1 liberal policy have been enacted
-    - Player A was just elected Chancellor
-    - Player B (the President) must now choose 2 policies from 3 cards to give to Player A
-    - The 3 cards are: Fascist, Fascist, Liberal
+    - 2 sabotage protocols and 1 security protocol have been resolved
+    - Player A was just appointed First Mate
+    - Player B (the Captain) must now choose 2 event cards from 3 draws to pass to Player A
+    - The 3 cards are: Sabotage, Sabotage, Security
     
-    As a Liberal player observing this, what should you be thinking about? What are the key considerations for this moment in the game? Analyze the strategic implications and what you should watch for.
+    As a Crewmate player observing this, what should you be thinking about? What are the key considerations for this moment in the game? Analyze the strategic implications and what you should watch for.
     """
     
     print("=" * 60)

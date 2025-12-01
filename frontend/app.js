@@ -1,7 +1,7 @@
-/* Secret Hitler Frontend (no backend logic changed)
+/* Secret Impostor Frontend (no backend logic changed)
  - Creates/joins a local game via frontend/server.py
  - Left column: chat bubbles (table talk + answers) and game events
- - Right column: policy tracks (liberal/fascist)
+ - Right column: policy tracks (crewmate/impostor)
 */
 
 // === add near other globals (top of app.js) ===
@@ -111,12 +111,12 @@ function renderPlayers(players) {
     const titleEl = el("div", "player-title", player.title);
     
     // Add role-based color classes to header
-    if (player.role.includes("Liberal")) {
-      roleEl.classList.add("liberal");
-    } else if (player.role.includes("Hitler")) {
-      roleEl.classList.add("hitler");
-    } else if (player.role.includes("Fascist")) {
-      roleEl.classList.add("fascist");
+    if (player.role.includes("Crewmate")) {
+      roleEl.classList.add("crewmate");
+    } else if (player.role.includes("Master Impostor")) {
+      roleEl.classList.add("master-impostor");
+    } else if (player.role.includes("Impostor")) {
+      roleEl.classList.add("impostor");
     }
     
     card.appendChild(nameEl);
@@ -273,12 +273,12 @@ function renderChat(events, players) {
       // Add role-based color to chat metadata
       if (player?.eliminated || player?.is_eliminated) {
         meta.classList.add("eliminated");
-      } else if (player?.role?.includes("Liberal")) {
-        meta.classList.add("liberal");
-      } else if (player?.role?.includes("Hitler")) {
-        meta.classList.add("hitler");
-      } else if (player?.role?.includes("Fascist")) {
-        meta.classList.add("fascist");
+      } else if (player?.role?.includes("Crewmate")) {
+        meta.classList.add("crewmate");
+      } else if (player?.role?.includes("Master Impostor")) {
+        meta.classList.add("master-impostor");
+      } else if (player?.role?.includes("Impostor")) {
+        meta.classList.add("impostor");
       }
       
       messageContainer.appendChild(meta);
@@ -325,16 +325,16 @@ function renderChat(events, players) {
       });
       
       let playerName = player?.name || ev.agent_id;
-      if (player?.name === "Hitler") {
+      if (player?.name === "Master Impostor") {
         const agentIndex = players.indexOf(player);
-        playerName = `Agent ${agentIndex} (Hitler)`;
+        playerName = `Agent ${agentIndex} (Master Impostor)`;
       } else if (player?.model === null || player?.is_you) {
         playerName = `${playerName} (You)`;
       }
       let targetName = targetPlayer?.name || ev.in_response_to_agent_id;
-      if (targetPlayer?.name === "Hitler") {
+      if (targetPlayer?.name === "Master Impostor") {
         const agentIndex = players.indexOf(targetPlayer);
-        targetName = `Agent ${agentIndex} (Hitler)`;
+        targetName = `Agent ${agentIndex} (Master Impostor)`;
       }
       
       const messageContainer = el("div", "message-container");
@@ -345,12 +345,12 @@ function renderChat(events, players) {
       // Add role-based color to chat metadata
       if (player?.eliminated || player?.is_eliminated) {
         meta.classList.add("eliminated");
-      } else if (player?.role?.includes("Liberal")) {
-        meta.classList.add("liberal");
-      } else if (player?.role?.includes("Hitler")) {
-        meta.classList.add("hitler");
-      } else if (player?.role?.includes("Fascist")) {
-        meta.classList.add("fascist");
+      } else if (player?.role?.includes("Crewmate")) {
+        meta.classList.add("crewmate");
+      } else if (player?.role?.includes("Master Impostor")) {
+        meta.classList.add("master-impostor");
+      } else if (player?.role?.includes("Impostor")) {
+        meta.classList.add("impostor");
       }
       
       messageContainer.appendChild(meta);
@@ -425,20 +425,39 @@ function renderChat(events, players) {
   }
 }
 
+  if (presidentEvent) {
+    presidentEvent.cards_drawn = (presidentEvent.cards_drawn || []).map(normalizeCardType);
+    presidentEvent.card_discarded = normalizeCardType(presidentEvent.card_discarded);
+  }
+  if (chancellorEvent) {
+    chancellorEvent.cards_received = (chancellorEvent.cards_received || []).map(normalizeCardType);
+    chancellorEvent.card_discarded = normalizeCardType(chancellorEvent.card_discarded);
+    chancellorEvent.card_played = normalizeCardType(chancellorEvent.card_played);
+  }
+
 // Helper function to normalize card types from backend
 function normalizeCardType(cardType) {
   if (!cardType) return cardType;
   const normalized = cardType.toLowerCase().trim();
-  
-  // Handle abbreviated formats
-  if (normalized === 'f' || normalized === 'ff' || normalized.startsWith('fasc')) {
-    return 'fascist';
+
+  if (
+    normalized === "impostor" ||
+    normalized === "s" ||
+    normalized === "ss" ||
+    normalized.startsWith("sab")
+  ) {
+    return "sabotage";
   }
-  if (normalized === 'l' || normalized === 'll' || normalized.startsWith('lib')) {
-    return 'liberal';
+  if (
+    normalized === "crewmate" ||
+    normalized === "l" ||
+    normalized === "ll" ||
+    normalized.startsWith("sec")
+  ) {
+    return "security";
   }
-  
-  return normalized; // Return as-is if already normalized
+
+  return normalized;
 }
 
 // === replace your entire renderCardSelection with this ===
@@ -490,26 +509,34 @@ function renderCardSelection(gameState) {
 
       if (!presidentEvent) {
         if (t.includes("You drew 3 cards:")) {
-          const cards = (t.match(/\[(.*?)\]/)?.[1] || "").split(", ").map(s => s.toLowerCase());
-          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").toLowerCase();
+          const cards = (t.match(/\[(.*?)\]/)?.[1] || "")
+            .split(", ")
+            .map(s => s.trim().toLowerCase());
+          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").trim().toLowerCase();
           if (cards.length) presidentEvent = { cards_drawn: cards, card_discarded: disc };
         } else if (t.includes("I drew") && t.includes("discarded")) {
-          const drew = (t.match(/I drew ([LF-]+)/)?.[1] || "")
-            .split("-").map(c => c === "L" ? "liberal" : "fascist");
-          const disc = (t.match(/discarded ([LF])/)?.[1] === "L") ? "liberal" : "fascist";
+          const drew = (t.match(/I drew ([A-Z ,]+)/i)?.[1] || "")
+            .split(/[-,]/)
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean);
+          const disc = (t.match(/discarded (\w+)/i)?.[1] || "").trim().toLowerCase();
           if (drew.length) presidentEvent = { cards_drawn: drew, card_discarded: disc };
         }
       }
 
       if (!chancellorEvent) {
         if (t.includes("You received 2 cards from President")) {
-          const cards = (t.match(/\[(.*?)\]/)?.[1] || "").split(", ").map(s => s.toLowerCase());
-          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").toLowerCase();
+          const cards = (t.match(/\[(.*?)\]/)?.[1] || "")
+            .split(", ")
+            .map(s => s.trim().toLowerCase());
+          const disc  = (t.match(/discarded (\w+)/i)?.[1] || "").trim().toLowerCase();
           if (cards.length) chancellorEvent = { cards_received: cards, card_discarded: disc };
         } else if (t.includes("I received") && t.includes("discarded")) {
-          const rec  = (t.match(/I received ([LF-]+)/)?.[1] || "")
-            .split("-").map(c => c === "L" ? "liberal" : "fascist");
-          const disc = (t.match(/discarded ([LF])/)?.[1] === "L") ? "liberal" : "fascist";
+          const rec  = (t.match(/I received ([A-Z ,]+)/i)?.[1] || "")
+            .split(/[-,]/)
+            .map(s => s.trim().toLowerCase())
+            .filter(Boolean);
+          const disc = (t.match(/discarded (\w+)/i)?.[1] || "").trim().toLowerCase();
           if (rec.length) chancellorEvent = { cards_received: rec, card_discarded: disc };
         }
       }
@@ -608,47 +635,53 @@ function renderCardSelection(gameState) {
 
 
 function renderTracks(gameState) {
-  const libRoot = $("#liberal-track");
-  const fasRoot = $("#fascist-track");
-  libRoot.classList.add("track", "liberal");
-  fasRoot.classList.add("track", "fascist");
+  const libRoot = $("#crewmate-track");
+  const fasRoot = $("#impostor-track");
+  libRoot.classList.add("track", "crewmate");
+  fasRoot.classList.add("track", "impostor");
 
-  // Count policies played from events
-  let liberalPolicies = 0;
-  let fascistPolicies = 0;
+  // Count protocols resolved from events
+  let securityResolved = 0;
+  let sabotageResolved = 0;
   
   if (gameState.events) {
     gameState.events.forEach(event => {
       if (event.event_type === "chancellor-play-policy" || event.card_played) {
-        if (event.card_played === "liberal") {
-          liberalPolicies++;
-        } else if (event.card_played === "fascist") {
-          fascistPolicies++;
+        if (event.card_played === "security") {
+          securityResolved++;
+        } else if (event.card_played === "sabotage") {
+          sabotageResolved++;
         }
       }
     });
   }
 
-  // Use backend values or fallback to defaults
-  const LIBERAL_SLOTS = gameState.liberal_policies_to_win || 5;
-  const FASCIST_SLOTS = gameState.fascist_policies_to_win || 6;
+  // Use backend totals when available
+  const SECURITY_SLOTS = gameState.security_target || 5;
+  const SABOTAGE_SLOTS = gameState.sabotage_target || 6;
+  if (typeof gameState.security_progress === "number") {
+    securityResolved = gameState.security_progress;
+  }
+  if (typeof gameState.sabotage_progress === "number") {
+    sabotageResolved = gameState.sabotage_progress;
+  }
 
   libRoot.innerHTML = "";
   fasRoot.innerHTML = "";
 
-  // Render Liberal track
-  for (let i = 0; i < LIBERAL_SLOTS; i++) {
-    const slot = el("div", "slot" + (i < liberalPolicies ? " filled" : ""));
-    if (i >= liberalPolicies) {
-      slot.textContent = i + 1; // Show slot numbers for empty slots
+  // Render Crewmate track
+  for (let i = 0; i < SECURITY_SLOTS; i++) {
+    const slot = el("div", "slot" + (i < securityResolved ? " filled" : ""));
+    if (i >= securityResolved) {
+      slot.textContent = i + 1;
     }
     libRoot.appendChild(slot);
   }
   
-  // Render Fascist track
-  for (let i = 0; i < FASCIST_SLOTS; i++) {
-    const slot = el("div", "slot" + (i < fascistPolicies ? " filled" : ""));
-    if (i >= fascistPolicies) {
+  // Render Impostor track
+  for (let i = 0; i < SABOTAGE_SLOTS; i++) {
+    const slot = el("div", "slot" + (i < sabotageResolved ? " filled" : ""));
+    if (i >= sabotageResolved) {
       slot.textContent = i + 1; // Show slot numbers for empty slots
     }
     fasRoot.appendChild(slot);

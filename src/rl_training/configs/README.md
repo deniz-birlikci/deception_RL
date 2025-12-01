@@ -1,6 +1,6 @@
 # Training Configuration
 
-This directory contains YAML configuration files for Secret Hitler RL training.
+This directory contains YAML configuration files for Secret Impostor RL training.
 
 ## Usage
 
@@ -43,7 +43,7 @@ train_steps = config.train.train_steps
 
 #### `model`
 Model configuration (name, project, base model)
-- `name`: Model identifier (e.g., "secret-hitler-v1")
+- `name`: Model identifier (e.g., "secret-impostor-v1")
 - `project`: Project name for logging
 - `base_model`: HuggingFace model to fine-tune
 
@@ -111,7 +111,7 @@ config = OmegaConf.merge(OmegaConf.structured(TrainingConfig), yaml_config)
 
 # Access nested values
 print(config.rollout.max_turns)  # 100
-print(config.model.name)  # "secret-hitler-v1"
+print(config.model.name)  # "secret-impostor-v1"
 
 # Pass to rollout function
 rollout(

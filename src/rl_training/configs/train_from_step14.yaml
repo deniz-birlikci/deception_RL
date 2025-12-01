@@ -1,8 +1,8 @@
-# Training config to resume secret-hitler-v16 from checkpoint step 14
+# Training config to resume secret-impostor-v16 from checkpoint step 14
 
 model:
-  name: "secret-hitler-v17"
-  project: "secret-hitler"
+  name: "secret-impostor-v17"
+  project: "secret-impostor"
   base_model: "Qwen/Qwen2.5-7B-Instruct"
 
 rollout:
@@ -11,7 +11,7 @@ rollout:
   simultaneous_games: 8
   enable_thinking: true
   verbose: false
-  trainable_fascist_prob: 1
+  trainable_impostor_prob: 1
 
 train:
   train_steps: 100

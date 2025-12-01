@@ -5,7 +5,7 @@ import traceback
 from asyncio import Queue
 from typing import Dict
 from src.models import AIModel, AgentRole
-from src.engine.engine import Engine
+from src.engine.engine import Engine, AgentNotFoundError
 from src.engine.deck import Deck
 from src.engine.protocol import ModelInput, ModelOutput, TerminalState
 
@@ -29,10 +29,10 @@ class EngineAPI:
         game_id: str,
         deck: Deck,
         ai_models: list[AIModel | None] = DEFAULT_AI_MODELS,
-        fascist_policies_to_win: int = 3,
-        liberal_policies_to_win: int = 3,
+        sabotage_protocols_to_win: int = 4,
+        security_protocols_to_win: int = 3,
         log_file: str | None = None,
-        trainable_fascist_prob: float = 0.6,
+        trainable_impostor_prob: float = 0.6,
     ) -> ModelInput:
         input_queue: Queue = Queue()
         output_queue: Queue = Queue()
@@ -42,11 +42,11 @@ class EngineAPI:
         engine = Engine(
             deck=deck,
             ai_models=ai_models,
-            fascist_policies_to_win=fascist_policies_to_win,
-            liberal_policies_to_win=liberal_policies_to_win,
+            sabotage_protocols_to_win=sabotage_protocols_to_win,
+            security_protocols_to_win=security_protocols_to_win,
             game_id=game_id,
             log_file=log_file,
-            trainable_fascist_prob=trainable_fascist_prob,
+            trainable_impostor_prob=trainable_impostor_prob,
         )
         self.engines[game_id] = engine
 
@@ -88,6 +88,17 @@ class EngineAPI:
         print(f"Running engine task for game {game_id}")
         try:
             await engine.run(input_queue, output_queue)
+        except AgentNotFoundError as e:
+            terminal = TerminalState(
+                game_id=game_id,
+                reward=-1.0,
+                winners=[],
+                winning_team=None,
+            )
+            await output_queue.put(
+                ModelInput(messages=[], tool_call=None, terminal_state=terminal)
+            )
+            print(f"Agent error: {e}")
         except Exception as e:
             tb = traceback.format_exc()
             print(f"Engine error: {str(e)}\n\nStack trace:\n{tb}")

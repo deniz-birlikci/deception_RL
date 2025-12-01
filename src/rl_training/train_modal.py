@@ -16,10 +16,10 @@ from art.utils.output_dirs import get_model_dir
 import weave
 
 # Create Modal app
-app = modal.App("SecretHitler-training")
+app = modal.App("SecretImpostor-training")
 
 checkpoint_volume = modal.Volume.from_name(
-    "art-secret-hitler-checkpoints", create_if_missing=True
+    "art-secret-impostor-checkpoints", create_if_missing=True
 )
 
 # Define the Modal image with all dependencies
@@ -182,7 +182,7 @@ async def gather_rollouts_with_timeout(
 )
 async def train(config_dict: dict):
     """
-    Train the Secret Hitler RL agent.
+    Train the Secret Impostor RL agent.
 
     Args:
         config_dict: Configuration dictionary (loaded from YAML and serialized)
@@ -326,7 +326,7 @@ async def train(config_dict: dict):
                         max_turns=config.rollout.max_turns,
                         enable_thinking=config.rollout.enable_thinking,
                         verbose=config.rollout.verbose,
-                        trainable_fascist_prob=config.rollout.trainable_fascist_prob,
+                        trainable_impostor_prob=config.rollout.trainable_impostor_prob,
                     )
                     for _ in range(config.rollout.simultaneous_games)
                 )
@@ -341,8 +341,8 @@ async def train(config_dict: dict):
         games_completed = len(all_trajectories)
         games_expected = config.rollout.simultaneous_games
         min_games_for_training = max(1, math.ceil(games_expected * 0.5))
-        fascist_starts = sum(
-            int(t.metrics.get("trainable_fascist_start", 0)) for t in all_trajectories
+        impostor_starts = sum(
+            int(t.metrics.get("trainable_impostor_start", 0)) for t in all_trajectories
         )
         winning_team_counts = Counter(
             (t.metadata.get("winning_team") or "unknown") for t in all_trajectories
@@ -367,12 +367,12 @@ async def train(config_dict: dict):
                 "step/exceptions": total_exceptions,
                 "step/games_completed": games_completed,
                 "step/games_expected": games_expected,
-                "step/trainable_fascist_starts": fascist_starts,
-                "step/fascist_wins": winning_team_counts.get("fascist", 0),
-                "step/liberal_wins": winning_team_counts.get("liberal", 0),
-                "step/trainable_role_hitler": role_counts.get("hitler", 0),
-                "step/trainable_role_fascist": role_counts.get("fascist", 0),
-                "step/trainable_role_liberal": role_counts.get("liberal", 0),
+                "step/trainable_impostor_starts": impostor_starts,
+                "step/impostor_wins": winning_team_counts.get("impostor", 0),
+                "step/crewmate_wins": winning_team_counts.get("crewmate", 0),
+                "step/trainable_role_master_impostor": role_counts.get("master_impostor", 0),
+                "step/trainable_role_impostor": role_counts.get("impostor", 0),
+                "step/trainable_role_crewmate": role_counts.get("crewmate", 0),
             }, step=i)
             print(f"Step {i}: {games_completed}/{games_expected} games completed, training...")
             print(f"Winning teams: {dict(winning_team_counts)} | Roles: {dict(role_counts)}")
@@ -381,12 +381,12 @@ async def train(config_dict: dict):
                 "step/games_completed": games_completed,
                 "step/games_expected": games_expected,
                 "step/exceptions": total_exceptions,
-                "step/trainable_fascist_starts": fascist_starts,
-                "step/fascist_wins": winning_team_counts.get("fascist", 0),
-                "step/liberal_wins": winning_team_counts.get("liberal", 0),
-                "step/trainable_role_hitler": role_counts.get("hitler", 0),
-                "step/trainable_role_fascist": role_counts.get("fascist", 0),
-                "step/trainable_role_liberal": role_counts.get("liberal", 0),
+                "step/trainable_impostor_starts": impostor_starts,
+                "step/impostor_wins": winning_team_counts.get("impostor", 0),
+                "step/crewmate_wins": winning_team_counts.get("crewmate", 0),
+                "step/trainable_role_master_impostor": role_counts.get("master_impostor", 0),
+                "step/trainable_role_impostor": role_counts.get("impostor", 0),
+                "step/trainable_role_crewmate": role_counts.get("crewmate", 0),
             }, step=i)
             failure_breakdown = ""
             if total_exceptions:

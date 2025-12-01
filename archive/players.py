@@ -5,9 +5,9 @@ from typing import Callable
 
 
 class Role(Enum):
-    LIBERAL = "Liberal"
-    FASCIST = "Fascist"
-    HITLER = "Hitler"
+    CREWMATE = "Crewmate"
+    IMPOSTOR = "Impostor"
+    MASTER_IMPOSTOR = "Master Impostor"
 
 
 @dataclass
@@ -29,25 +29,25 @@ def setup_5_players(llm_functions: list[Callable]):
         LLMPlayer(name=f"P{i+1}", llm_fn=llm) for i, llm in enumerate(llm_functions)
     ]
 
-    deck = [Role.LIBERAL, Role.LIBERAL, Role.LIBERAL, Role.FASCIST, Role.HITLER]
+    deck = [Role.CREWMATE, Role.CREWMATE, Role.CREWMATE, Role.IMPOSTOR, Role.MASTER_IMPOSTOR]
     random.shuffle(deck)
 
     for p, r in zip(players, deck):
         p.role = r
 
     # Assign vision rules:
-    # • Fascist knows other Fascist AND Hitler (in 5p there is 1 F + 1 H)
-    # • Hitler **knows the Fascist in 5p**
-    # • Liberals know nothing
-    fascist = [p for p in players if p.role == Role.FASCIST]
-    hitler = [p for p in players if p.role == Role.HITLER][0]
+    # • Impostor knows other Impostor AND Master Impostor (in 5p there is 1 F + 1 H)
+    # • Master Impostor **knows the Impostor in 5p**
+    # • Crewmates know nothing
+    impostor = [p for p in players if p.role == Role.IMPOSTOR]
+    master_impostor = [p for p in players if p.role == Role.MASTER_IMPOSTOR][0]
 
-    # Fascist sees Hitler
-    if fascist:
-        f = fascist[0]
-        f.sees = [hitler.name]
+    # Impostor sees Master Impostor
+    if impostor:
+        impostor_player = impostor[0]
+        impostor_player.sees = [master_impostor.name]
 
-    # Hitler sees Fascist (only in 5–6p)
-    hitler.sees = [fascist[0].name] if fascist else []
+    # Master Impostor sees Impostor (only in 5–6p)
+    master_impostor.sees = [impostor[0].name] if impostor else []
 
     return players

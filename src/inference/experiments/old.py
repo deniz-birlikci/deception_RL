@@ -2,7 +2,7 @@ import modal
 import time
 import json
 
-app = modal.App("rl-secret-hitler-inference-with-tools")
+app = modal.App("rl-secret-impostor-inference-with-tools")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")

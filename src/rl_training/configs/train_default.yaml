@@ -1,11 +1,11 @@
-# Default training configuration for Secret Hitler RL
+# Default training configuration for Secret Impostor RL
 # 
 # Usage:
 #   modal run src/rl_training/train_modal.py --config configs/train_default.yaml
 
 model:
-  name: "secret-hitler-v16"
-  project: "secret-hitler"
+  name: "secret-impostor-v16"
+  project: "secret-impostor"
   base_model: "Qwen/Qwen2.5-7B-Instruct"
 
 rollout:
@@ -14,7 +14,7 @@ rollout:
   simultaneous_games: 8
   enable_thinking: true
   verbose: false
-  trainable_fascist_prob: 0.9  # 90% chance trainable agent is Fascist/Hitler
+  trainable_impostor_prob: 1  # 90% chance trainable agent is Impostor/Master Impostor
 
 train:
   train_steps: 100

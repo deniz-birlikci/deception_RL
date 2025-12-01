@@ -41,11 +41,11 @@ from src.engine.prompts import get_base_game_rules_prompt, get_strategic_game_pr
 from src.tools import generate_tools
 
 ROLES = [
-    AgentRole.HITLER,
-    AgentRole.FASCIST,
-    AgentRole.LIBERAL,
-    AgentRole.LIBERAL,
-    AgentRole.LIBERAL,
+    AgentRole.MASTER_IMPOSTOR,
+    AgentRole.IMPOSTOR,
+    AgentRole.CREWMATE,
+    AgentRole.CREWMATE,
+    AgentRole.CREWMATE,
 ]
 
 
@@ -62,21 +62,25 @@ def get_backend_for_model(ai_model: AIModel | None) -> Backend:
     return Backend.OPENAI
 
 
+class AgentNotFoundError(Exception):
+    """Raised when the engine receives a request for an unknown agent id."""
+
+
 class Engine:
     def __init__(
         self,
         deck: Deck,
         ai_models: list[AIModel | None],
-        fascist_policies_to_win: int,
-        liberal_policies_to_win: int,
+        sabotage_protocols_to_win: int,
+        security_protocols_to_win: int,
         game_id: str,
         log_file: str | None = None,
-        trainable_fascist_prob: float = 0.6,  # Probability trainable agent is Fascist/Hitler
+        trainable_impostor_prob: float = 0.6,  # Probability trainable agent is Impostor/Master
     ) -> None:
         self.deck = deck
-        self.fascist_policies_to_win = fascist_policies_to_win
-        self.liberal_policies_to_win = liberal_policies_to_win
-        self.hitler_election_threshold = fascist_policies_to_win // 2
+        self.sabotage_track_target = sabotage_protocols_to_win
+        self.security_track_target = security_protocols_to_win
+        self.promotion_threshold = sabotage_protocols_to_win // 2
         self.game_id = game_id
         self.log_file = log_file
 
@@ -94,10 +98,10 @@ class Engine:
         trainable_idx = next((i for i, model in enumerate(ai_models) if model is None), None)
 
         # Assign roles with optional oversampling for trainable agent
-        if trainable_idx is not None and random.random() < trainable_fascist_prob:
-            # Force trainable agent to be Fascist or Hitler
-            fascist_roles = [AgentRole.HITLER, AgentRole.FASCIST]
-            trainable_role = random.choice(fascist_roles)
+        if trainable_idx is not None and random.random() < trainable_impostor_prob:
+            # Force trainable agent to be on the Impostor team
+            impostor_roles = [AgentRole.MASTER_IMPOSTOR, AgentRole.IMPOSTOR]
+            trainable_role = random.choice(impostor_roles)
             
             # Remaining roles for other agents
             remaining_roles = list(ROLES)
@@ -119,7 +123,9 @@ class Engine:
 
         agent_ids = [f"agent_{i}" for i in range(len(ai_models))]
         agents = []
-        for idx, (aid, role, model) in enumerate(zip(agent_ids, shuffled_roles, ai_models)):
+        for idx, (aid, role, model) in enumerate(
+            zip(agent_ids, shuffled_roles, ai_models)
+        ):
             is_policy = idx == trainable_idx
             agent = Agent(
                 agent_id=aid,
@@ -138,8 +144,8 @@ class Engine:
         self.president_rotation: list[str] = random.sample(agent_ids, len(agent_ids))
         self.current_president_idx: int = 0
         self.current_chancellor_id: str | None = None
-        self.fascist_policies_played: int = 0
-        self.liberal_policies_played: int = 0
+        self.sabotage_progress: int = 0
+        self.security_progress: int = 0
         self.failed_election_tracker: int = 0
         self.event_counter: int = 0
         self.public_events: list = []
@@ -151,6 +157,11 @@ class Engine:
             aid: [] for aid in agent_ids
         }
         system_prompt = self._build_system_prompt()
+        print(
+            f"[Engine] Initialized game {self.game_id[:8]} with agents: "
+            f"{', '.join(f'{a.agent_id}:{a.role.value}' for a in agents)} | "
+            f"trainable={self.trainable_agent_id}"
+        )
 
         # Dedicated renderer to convert policy agent history to OpenAI format
         self._policy_message_renderer: BaseAgent | None = None
@@ -159,7 +170,7 @@ class Engine:
                 backend=Backend.OPENAI,
                 agent=Agent(
                     agent_id="policy-renderer",
-                    role=AgentRole.LIBERAL,
+                    role=AgentRole.CREWMATE,
                     ai_model=AIModel.OPENAI_GPT_5_NANO,
                 ),
                 ai_model=AIModel.OPENAI_GPT_5_NANO,
@@ -198,10 +209,10 @@ class Engine:
         winning_team = None
         if winners:
             first_role = winners[0].role
-            if first_role == AgentRole.LIBERAL:
-                winning_team = "liberal"
+            if first_role == AgentRole.CREWMATE:
+                winning_team = "crewmate"
             else:
-                winning_team = "fascist"
+                winning_team = "impostor"
 
         return TerminalState(
             game_id=self.game_id,
@@ -343,10 +354,10 @@ class Engine:
             self.event_counter += 1
             # await self._log_state_to_file()
 
-            if played == PolicyCard.FASCIST:
-                self.fascist_policies_played += 1
+            if played == PolicyCard.SABOTAGE:
+                self.sabotage_progress += 1
             else:
-                self.liberal_policies_played += 1
+                self.security_progress += 1
 
             await self._discourse(input_queue, output_queue)
             # await self._log_state_to_file()
@@ -384,6 +395,11 @@ class Engine:
         allowed_tools: list[str] | None = None,
         eligible_agent_ids: list[str] | None = None,
     ) -> Tools:
+        if agent_id not in self.agents_by_id:
+            raise AgentNotFoundError(
+                f"Unknown agent_id '{agent_id}' in game {self.game_id}. "
+                f"Known agents: {list(self.agents_by_id.keys())}"
+            )
         agent = self.agents_by_id[agent_id]
         new_user_inputs = self._get_new_user_events_since_last_message(
             agent_id, prompt_guidance
@@ -541,10 +557,10 @@ class Engine:
             )
         )
         self.event_counter += 1
-        if top_card == PolicyCard.FASCIST:
-            self.fascist_policies_played += 1
+        if top_card == PolicyCard.SABOTAGE:
+            self.sabotage_progress += 1
         else:
-            self.liberal_policies_played += 1
+            self.security_progress += 1
         self.failed_election_tracker = 0
 
     async def _vote(
@@ -607,43 +623,46 @@ class Engine:
 
     def _is_game_over(self) -> bool:
         return (
-            self.fascist_policies_played >= self.fascist_policies_to_win
-            or self.liberal_policies_played >= self.liberal_policies_to_win
-            or self._hitler_elected()
+            self.sabotage_progress >= self.sabotage_track_target
+            or self.security_progress >= self.security_track_target
+            or self._master_impostor_promoted()
         )
 
-    def _hitler_elected(self) -> bool:
-        if self.fascist_policies_played < self.hitler_election_threshold:
+    def _master_impostor_promoted(self) -> bool:
+        if self.sabotage_progress < self.promotion_threshold:
             return False
         if self.current_chancellor_id is None:
             return False
-        return self.agents_by_id[self.current_chancellor_id].role == AgentRole.HITLER
+        return (
+            self.agents_by_id[self.current_chancellor_id].role
+            == AgentRole.MASTER_IMPOSTOR
+        )
 
     def _get_winners(self) -> list[Agent]:
         if (
-            self.fascist_policies_played >= self.fascist_policies_to_win
-            or self._hitler_elected()
+            self.sabotage_progress >= self.sabotage_track_target
+            or self._master_impostor_promoted()
         ):
             return [
                 agent
                 for agent in self.agents_by_id.values()
-                if agent.role in [AgentRole.HITLER, AgentRole.FASCIST]
+                if agent.role in [AgentRole.MASTER_IMPOSTOR, AgentRole.IMPOSTOR]
             ]
         else:
             return [
                 agent
                 for agent in self.agents_by_id.values()
-                if agent.role == AgentRole.LIBERAL
+                if agent.role == AgentRole.CREWMATE
             ]
 
     def _build_system_prompt(self) -> str:
         rules_prompt = get_strategic_game_prompt(
             num_players=len(self.agents_by_id),
-            fascist_policies_to_win=self.fascist_policies_to_win,
-            liberal_policies_to_win=self.liberal_policies_to_win,
-            hitler_election_threshold=self.hitler_election_threshold,
-            num_liberal_cards=self.deck.total_liberal_cards,
-            num_fascist_cards=self.deck.total_fascist_cards,
+            sabotage_track_target=self.sabotage_track_target,
+            security_track_target=self.security_track_target,
+            promotion_threshold=self.promotion_threshold,
+            num_crewmate_cards=self.deck.total_security_cards,
+            num_impostor_cards=self.deck.total_sabotage_cards,
         )
         return f"""{rules_prompt}
         What is Private:
@@ -687,11 +706,11 @@ class Engine:
         === GAME STATE ===
         Your Agent ID: {agent_id}
         Your Role: {agent.role}
-        Current President: {self.president_rotation[self.current_president_idx]}
-        Current Chancellor: {self.current_chancellor_id if self.current_chancellor_id else "None"}
-        Fascist Policies Played: {self.fascist_policies_played}/{self.fascist_policies_to_win}
-        Liberal Policies Played: {self.liberal_policies_played}/{self.liberal_policies_to_win}
-        Failed Elections: {self.failed_election_tracker}/3 (at 3, top policy is played automatically)
+        Current Captain: {self.president_rotation[self.current_president_idx]}
+        Current First Mate: {self.current_chancellor_id if self.current_chancellor_id else "None"}
+        Sabotage Progress: {self.sabotage_progress}/{self.sabotage_track_target}
+        Security Progress: {self.security_progress}/{self.security_track_target}
+        Failed Assignments: {self.failed_election_tracker}/3 (at 3, the top event auto-resolves)
 
         All Agents: {list(self.agents_by_id.keys())}
         """
@@ -719,8 +738,8 @@ class Engine:
             "president_rotation": self.president_rotation,
             "current_president_idx": self.current_president_idx,
             "current_chancellor_id": self.current_chancellor_id,
-            "fascist_policies_played": self.fascist_policies_played,
-            "liberal_policies_played": self.liberal_policies_played,
+            "sabotage_progress": self.sabotage_progress,
+            "security_progress": self.security_progress,
             "failed_election_tracker": self.failed_election_tracker,
             "public_events": [str(e) for e in self.public_events],
             "private_events_by_agent": {

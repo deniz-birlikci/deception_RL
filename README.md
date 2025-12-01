@@ -1,4 +1,4 @@
-We propose that language models can learn basic game theory and, more importantly **learn to deceive** other language models with RL. We propose this through a game of SecretHitler, where you win the game with the odds stacked against you if you can effectively deceive and strategize against your opponent.
+We propose that language models can learn basic game theory and, more importantly **learn to deceive** other language models with RL. We propose this through a game of Secret Impostor, where you win the game with the odds stacked against you if you can effectively deceive and strategize against your opponent.
 
 ## Game Engine
 

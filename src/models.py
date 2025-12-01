@@ -132,9 +132,9 @@ MessageHistory = Annotated[
 
 
 class AgentRole(str, Enum):
-    LIBERAL = "liberal"
-    FASCIST = "fascist"
-    HITLER = "hitler"
+    CREWMATE = "crewmate"
+    IMPOSTOR = "impostor"
+    MASTER_IMPOSTOR = "master_impostor"
 
 
 class Agent(BaseModel):
@@ -145,8 +145,8 @@ class Agent(BaseModel):
 
 
 class PolicyCard(str, Enum):
-    LIBERAL = "liberal"
-    FASCIST = "fascist"
+    SECURITY = "security"
+    SABOTAGE = "sabotage"
 
 
 class EngineEvent(BaseModel):
@@ -229,7 +229,9 @@ class ChancellorPlayPolicyEventPublic(EngineEvent):
     card_played: PolicyCard
 
     def __str__(self) -> str:
-        policy_str = "FASCIST" if self.card_played == PolicyCard.FASCIST else "LIBERAL"
+        policy_str = (
+            "SABOTAGE" if self.card_played == PolicyCard.SABOTAGE else "SECURITY"
+        )
         if self.chancellor_id is None:
-            return f"[AUTO-PLAY] A {policy_str} policy was automatically played (3 failed elections)"
-        return f"Chancellor {self.chancellor_id} played a {policy_str} policy"
+            return f"[AUTO-RESOLVE] A {policy_str} protocol was automatically executed (3 failed assignments)"
+        return f"First Mate {self.chancellor_id} resolved a {policy_str} protocol"

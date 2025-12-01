@@ -1803,7 +1803,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rl-secret-hitler"
+name = "rl-secret-impostor"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

@@ -54,19 +54,19 @@ def compute_oversampling_role_metrics(
     train_groups: Iterable[art.TrajectoryGroup],
 ) -> dict[str, float]:
     """
-    Measure how often the trainable policy starts on the fascist team.
+    Measure how often the trainable policy starts on the impostor team.
     """
     metrics: dict[str, float] = {}
     trajectories = _flatten_trajectories(train_groups)
     if not trajectories:
         return metrics
 
-    fascist_starts = sum(
-        int(t.metrics.get("trainable_fascist_start", 0)) for t in trajectories
+    impostor_starts = sum(
+        int(t.metrics.get("trainable_impostor_start", 0)) for t in trajectories
     )
-    metrics["oversample/fascist_starts"] = float(fascist_starts)
+    metrics["oversample/impostor_starts"] = float(impostor_starts)
     metrics["oversample/total_games"] = float(len(trajectories))
-    metrics["oversample/fascist_ratio"] = (
-        fascist_starts / len(trajectories) if trajectories else 0.0
+    metrics["oversample/impostor_ratio"] = (
+        impostor_starts / len(trajectories) if trajectories else 0.0
     )
     return metrics

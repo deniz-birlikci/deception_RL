@@ -10,9 +10,9 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 .player-card.you-player { border: 2px solid #3b82f6; border-radius: 8px; padding: 4px 6px; background: rgba(59, 130, 246, 0.1); margin: -6px -8px; }
 .player-name { font-weight: 600; color: #e5e7eb; }
 .player-role { font-size: 11px; opacity: 0.85; font-weight: 500; }
-.player-role.liberal { color: #34d399; }
-.player-role.fascist { color: #f87171; }
-.player-role.hitler { color: #f87171; }
+.player-role.crewmate { color: #34d399; }
+.player-role.impostor { color: #f87171; }
+.player-role.master-impostor { color: #f87171; }
 .player-title { font-size: 10px; color: #2563eb; font-weight: 600; }
 
 /* Eliminated player styling */
@@ -53,9 +53,9 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 
 .message-container { display: flex; flex-direction: column; gap: 4px; }
 .message-container .chat-meta { font-size: 11px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
-.chat-meta.liberal { color: #34d399; }
-.chat-meta.fascist { color: #f87171; }
-.chat-meta.hitler { color: #f87171; }
+.chat-meta.crewmate { color: #34d399; }
+.chat-meta.impostor { color: #f87171; }
+.chat-meta.master-impostor { color: #f87171; }
 .chat-meta.eliminated { color: #374151 !important; opacity: 0.6; }
 
 .chat-item { max-width: 80%; padding: 10px 12px; border-radius: 14px; line-height: 1.3; color: #e5e7eb; }
@@ -151,11 +151,11 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
   transition: all 0.3s ease;
 }
 
-.policy-card.liberal {
-  background-image: url('./media/liberal-card.png');
+.policy-card.crewmate {
+  background-image: url('./media/crewmate-card.png');
 }
 
-.policy-card.fascist {
+.policy-card.impostor {
   background-image: url('./media/facist-card.png');
 }
 
@@ -172,8 +172,8 @@ html, body { height: 100%; margin: 0; padding: 0; font-family: Inter, system-ui,
 .track { display: grid; gap: 8px; grid-auto-flow: column; grid-auto-columns: 65px; justify-content: flex-start; }
 .track .slot { width: 65px; height: 91px; border-radius: 6px; border: 2px dashed #1f2937; display: flex; align-items: center; justify-content: center; color: #9ca3af; font-size: 10px; background-size: cover; background-position: center; background-repeat: no-repeat; }
 .track .slot.filled { border-style: solid; border-color: #374151; }
-.track.liberal .slot.filled { background-image: url('./media/liberal-card.png'); }
-.track.fascist .slot.filled { background-image: url('./media/facist-card.png'); }
+.track.crewmate .slot.filled { background-image: url('./media/crewmate-card.png'); }
+.track.impostor .slot.filled { background-image: url('./media/facist-card.png'); }
 
 .chat-list::-webkit-scrollbar, .events-list::-webkit-scrollbar { width: 10px; }
 .chat-list::-webkit-scrollbar-thumb, .events-list::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 10px; }

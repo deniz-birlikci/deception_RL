@@ -11,7 +11,7 @@ class TerminalState(BaseModel):
         game_id: Unique identifier for the game
         winners: List of agents who won the game
         reward: Final reward value (based on win/loss)
-        winning_team: Which team won the game ("liberal" or "fascist")
+        winning_team: Which team won the game ("crewmate" or "impostor")
     """
 
     game_id: str
