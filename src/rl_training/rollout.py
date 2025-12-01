@@ -492,6 +492,7 @@ async def rollout(
     trainable_role = _engine_api.get_trainable_agent_role(game_id)
     trainable_role_value = trainable_role.value if trainable_role else None
     trainable_is_impostor = trainable_role in {AgentRole.IMPOSTOR, AgentRole.MASTER_IMPOSTOR}
+    trainable_agent_id = _engine_api.get_trainable_agent_id(game_id)
     policy_role = get_policy_role(_engine_api, game_id)
 
     trajectory = art.Trajectory(
@@ -501,6 +502,7 @@ async def rollout(
             "validation": is_validation,
             "game_id": game_id,
             "trainable_role": trainable_role_value,
+            "trainable_agent_id": trainable_agent_id,
         },
         reward=0,
         metrics={
@@ -510,6 +512,10 @@ async def rollout(
             "trainable_impostor_start": 1 if trainable_is_impostor else 0,
             "engine_execute_time_ms": 0.0,
             "total_engine_time_ms": 0.0,
+            "discard_as_president_count": 0,
+            "discard_as_president_own_card_count": 0,
+            "discard_as_chancellor_count": 0,
+            "discard_as_chancellor_own_card_count": 0,
         },
         # tools=TOOLS,  # Store tool schemas in trajectory
     )
@@ -532,117 +538,134 @@ async def rollout(
                 msg["content"] = content[0].get("text", "")
         return msg
 
-    # Main game loop
-    while not game_over and num_turns < max_turns:
-        num_turns += 1
+    try:
+        # Main game loop
+        while not game_over and num_turns < max_turns:
+            num_turns += 1
 
-        # Add only NEW messages to trajectory (avoid duplicates)
-        # Skip assistant messages since we add Choice objects directly
-        new_messages = model_input.messages[messages_added_count:]
-        for msg in new_messages:
-            if msg.get("role") != "assistant":
-                trajectory.messages_and_choices.append(clean_msg(msg))
-        
-        messages_added_count = len(model_input.messages)
-
-        # Check if we have a terminal state (game over)
-        if model_input.terminal_state is not None:
-            game_over = True
-            terminal_state: TerminalState = model_input.terminal_state
+            # Add only NEW messages to trajectory (avoid duplicates)
+            # Skip assistant messages since we add Choice objects directly
+            new_messages = model_input.messages[messages_added_count:]
+            for msg in new_messages:
+                if msg.get("role") != "assistant":
+                    trajectory.messages_and_choices.append(clean_msg(msg))
             
-            trajectory.reward = terminal_state.reward
-            if terminal_state.winning_team:
-                trajectory.metadata["winning_team"] = terminal_state.winning_team
-            assert terminal_state.game_id == game_id
-            break
+            messages_added_count = len(model_input.messages)
 
-        # At this point, we should have a tool_call target
-        if model_input.tool_call is None:
-            raise ValueError(
-                f"Expected tool_call target at turn {num_turns}, but got None. "
-                "This should only happen when terminal_state is not None."
-            )
+            # Check if we have a terminal state (game over)
+            if model_input.terminal_state is not None:
+                game_over = True
+                terminal_state: TerminalState = model_input.terminal_state
+                
+                trajectory.reward = terminal_state.reward
+                if terminal_state.winning_team:
+                    trajectory.metadata["winning_team"] = terminal_state.winning_team
+                if getattr(terminal_state, "trainable_agent_id", None):
+                    trajectory.metadata["trainable_agent_id"] = terminal_state.trainable_agent_id
+                if getattr(terminal_state, "emdash_counts", None):
+                    trajectory.metadata["emdash_counts"] = terminal_state.emdash_counts
+                assert terminal_state.game_id == game_id
+                break
 
-        # Get valid tool call from model (with retries)
-        try:
-            with weave.thread(thread_id=game_id):
-                tool_name, arguments, num_retries = await get_completion_with_retries(
-                    model=model,
-                    messages=get_messages_from_trajectory(trajectory.messages_and_choices),
-                    tool_target=model_input.tool_call,
-                    trajectory=trajectory,
-                    enable_thinking=enable_thinking,
-                    verbose=verbose,
+            # At this point, we should have a tool_call target
+            if model_input.tool_call is None:
+                raise ValueError(
+                    f"Expected tool_call target at turn {num_turns}, but got None. "
+                    "This should only happen when terminal_state is not None."
                 )
 
-            # Track retry metrics
-            trajectory.metrics["total_retries"] += num_retries
+            # Get valid tool call from model (with retries)
+            try:
+                with weave.thread(thread_id=game_id):
+                    tool_name, arguments, num_retries = await get_completion_with_retries(
+                        model=model,
+                        messages=get_messages_from_trajectory(trajectory.messages_and_choices),
+                        tool_target=model_input.tool_call,
+                        trajectory=trajectory,
+                        enable_thinking=enable_thinking,
+                        verbose=verbose,
+                    )
 
-            # Format for engine and execute (with timing)
-            model_function_calling_json = format_tool_response_for_game_engine(
-                tool_name, arguments
-            )
-            execute_start = time.perf_counter()
-            model_input = await _engine_api.execute(
-                game_id, ModelOutput(function_calling_json=model_function_calling_json)
-            )
-            execute_time_ms = (time.perf_counter() - execute_start) * 1000
+                # Track retry metrics
+                trajectory.metrics["total_retries"] += num_retries
 
-            # Track engine timing metrics
-            trajectory.metrics["engine_execute_time_ms"] += execute_time_ms
-            trajectory.metrics["total_engine_time_ms"] += execute_time_ms
+                # Format for engine and execute (with timing)
+                model_function_calling_json = format_tool_response_for_game_engine(
+                    tool_name, arguments
+                )
+                execute_start = time.perf_counter()
+                model_input = await _engine_api.execute(
+                    game_id, ModelOutput(function_calling_json=model_function_calling_json)
+                )
+                execute_time_ms = (time.perf_counter() - execute_start) * 1000
 
-        except (openai.LengthFinishReasonError, EngineException):
-            # Fatal errors - propagate up to @art.retry decorator
-            raise
+                # Track engine timing metrics
+                trajectory.metrics["engine_execute_time_ms"] += execute_time_ms
+                trajectory.metrics["total_engine_time_ms"] += execute_time_ms
 
-        except Exception as e:
-            # Unexpected error - mark as invalid and end game with penalty
-            trajectory.metrics["invalid_tool_calls"] += 1
-            trajectory.metrics["total_retries"] += MAX_RETRIES
-            trajectory.reward = -1.0
-            trajectory.metrics["failed_on_invalid_tool"] = True
-            logger.warning(f"Game {game_id[:8]} ended with error: {e}")
-            game_over = True
+            except (openai.LengthFinishReasonError, EngineException):
+                # Fatal errors - propagate up to @art.retry decorator
+                raise
 
-    # Record final metrics
-    trajectory.metrics["num_turns"] = num_turns
-    trajectory.metrics["hit_max_turns"] = num_turns >= max_turns
+            except Exception as e:
+                # Unexpected error - mark as invalid and end game with penalty
+                trajectory.metrics["invalid_tool_calls"] += 1
+                trajectory.metrics["total_retries"] += MAX_RETRIES
+                trajectory.reward = -1.0
+                trajectory.metrics["failed_on_invalid_tool"] = True
+                logger.warning(f"Game {game_id[:8]} ended with error: {e}")
+                game_over = True
 
-    if num_turns >= max_turns and not game_over:
-        trajectory.reward = -0.5
-        trajectory.metrics["forced_termination"] = True
+        # Record final metrics
+        trajectory.metrics["num_turns"] = num_turns
+        trajectory.metrics["hit_max_turns"] = num_turns >= max_turns
 
-    # Count trajectory composition
-    choice_count = sum(1 for item in trajectory.messages_and_choices if hasattr(item, 'message'))
-    msg_count = len(trajectory.messages_and_choices) - choice_count
+        if num_turns >= max_turns and not game_over:
+            trajectory.reward = -0.5
+            trajectory.metrics["forced_termination"] = True
 
-    # Determine outcome (reward=0 means trainable agent's team lost, not a draw)
-    outcome = "WIN" if trajectory.reward > 0 else "LOSS"
+        # Count trajectory composition
+        choice_count = sum(1 for item in trajectory.messages_and_choices if hasattr(item, 'message'))
+        msg_count = len(trajectory.messages_and_choices) - choice_count
 
-    # Log clean game summary to console
-    logger.info(
-        f"Game {game_id[:8]} | {outcome} | "
-        f"reward={trajectory.reward:.2f} | turns={num_turns} | "
-        f"choices={choice_count} | messages={msg_count}"
-    )
+        # Determine outcome (reward=0 means trainable agent's team lost, not a draw)
+        outcome = "WIN" if trajectory.reward > 0 else "LOSS"
 
-    if not final_state_logged:
-        with weave.thread(thread_id=game_id):
-            log_final_trajectory_state(
-                game_id=game_id,
-                messages_and_choices=trajectory.messages_and_choices,
-                reward=trajectory.reward,
-            )
+        # Log clean game summary to console
+        logger.info(
+            f"Game {game_id[:8]} | {outcome} | "
+            f"reward={trajectory.reward:.2f} | turns={num_turns} | "
+            f"choices={choice_count} | messages={msg_count}"
+        )
 
-    # Calculate rollout duration
-    rollout_duration_seconds = time.perf_counter() - rollout_start_time
-    trajectory.metrics["rollout_duration_seconds"] = rollout_duration_seconds
-    
-    # Analyze discard behavior for the policy agent
-    _analyze_discard_behavior(trajectory, policy_role)
+        if not final_state_logged:
+            with weave.thread(thread_id=game_id):
+                log_final_trajectory_state(
+                    game_id=game_id,
+                    messages_and_choices=trajectory.messages_and_choices,
+                    reward=trajectory.reward,
+                )
 
-    return trajectory
+        # Calculate rollout duration
+        rollout_duration_seconds = time.perf_counter() - rollout_start_time
+        trajectory.metrics["rollout_duration_seconds"] = rollout_duration_seconds
+        
+        # Analyze discard behavior for the policy agent
+        _analyze_discard_behavior(trajectory, policy_role)
+
+        return trajectory
+
+    except (openai.LengthFinishReasonError, EngineException):
+        raise
+    except Exception:
+        logger.exception(
+            "Unexpected rollout failure | step=%s | game=%s | num_turns=%s | role=%s",
+            step,
+            game_id[:8],
+            num_turns,
+            trainable_role_value,
+        )
+        raise
 
 
 # Per-game timeout (in seconds) - if a single game takes longer, it fails individually

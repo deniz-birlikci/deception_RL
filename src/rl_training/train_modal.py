@@ -191,7 +191,11 @@ async def train(config_dict: dict):
     import logging
     from .rollout import rollout_with_timeout
     from .config import TrainingConfig
-    from .metrics_utils import compute_role_based_metrics, compute_oversampling_role_metrics
+    from .metrics_utils import (
+        compute_role_based_metrics,
+        compute_oversampling_role_metrics,
+        compute_emdash_metrics,
+    )
     from art.local import LocalBackend
     import wandb
 
@@ -407,7 +411,8 @@ async def train(config_dict: dict):
         # Compute and log role-based metrics for all trajectories
         role_metrics = compute_role_based_metrics(train_groups)
         oversample_metrics = compute_oversampling_role_metrics(train_groups)
-        combined_metrics = {**role_metrics, **oversample_metrics}
+        emdash_metrics = compute_emdash_metrics(train_groups)
+        combined_metrics = {**role_metrics, **oversample_metrics, **emdash_metrics}
         if combined_metrics:
             wandb.log(combined_metrics, step=i)
             print(f"Role-based metrics logged: {len(combined_metrics)} metrics")

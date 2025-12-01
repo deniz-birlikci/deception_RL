@@ -70,3 +70,57 @@ def compute_oversampling_role_metrics(
         impostor_starts / len(trajectories) if trajectories else 0.0
     )
     return metrics
+
+
+def compute_emdash_metrics(
+    train_groups: Iterable[art.TrajectoryGroup],
+) -> dict[str, float]:
+    """
+    Aggregate em dash usage statistics for each agent and the trainable policy.
+    """
+    metrics: dict[str, float] = {}
+    trajectories = _flatten_trajectories(train_groups)
+    if not trajectories:
+        return metrics
+
+    total_games = len(trajectories)
+    aggregated_counts: dict[str, float] = {}
+    observed_agents: set[str] = set()
+    trainable_total = 0.0
+    trainable_games = 0
+    non_trainable_total = 0.0
+    non_trainable_agents: set[str] = set()
+
+    for trajectory in trajectories:
+        emdash_counts = trajectory.metadata.get("emdash_counts") or {}
+        trainable_agent_id = trajectory.metadata.get("trainable_agent_id")
+
+        for agent_id, count in emdash_counts.items():
+            observed_agents.add(agent_id)
+            aggregated_counts[agent_id] = aggregated_counts.get(agent_id, 0.0) + float(count)
+
+        if trainable_agent_id:
+            trainable_total += float(emdash_counts.get(trainable_agent_id, 0))
+            trainable_games += 1
+
+        for agent_id, count in emdash_counts.items():
+            if agent_id != trainable_agent_id:
+                non_trainable_total += float(count)
+                non_trainable_agents.add(agent_id)
+
+    for agent_id in sorted(observed_agents):
+        metrics[f"emdashes/{agent_id}/avg_per_game"] = (
+            aggregated_counts.get(agent_id, 0.0) / total_games
+        )
+
+    metrics["emdashes/trainable/avg_per_game"] = (
+        trainable_total / trainable_games if trainable_games else 0.0
+    )
+    metrics["emdashes/trainable/total_count"] = trainable_total
+
+    if non_trainable_agents:
+        metrics["emdashes/non_trainable/avg_per_agent"] = (
+            non_trainable_total / (len(non_trainable_agents) * total_games)
+        )
+
+    return metrics

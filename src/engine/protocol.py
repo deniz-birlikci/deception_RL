@@ -1,5 +1,5 @@
 from typing import Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from src.models import Agent
 
 
@@ -18,6 +18,8 @@ class TerminalState(BaseModel):
     winners: list[Agent]
     reward: float
     winning_team: str | None = None
+    trainable_agent_id: str | None = None
+    emdash_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class ToolCallTarget(BaseModel):

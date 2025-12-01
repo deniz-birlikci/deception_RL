@@ -156,6 +156,7 @@ class Engine:
         self.msg_history: dict[str, list[MessageHistory]] = {
             aid: [] for aid in agent_ids
         }
+        self.em_dash_counts: dict[str, int] = {aid: 0 for aid in agent_ids}
         system_prompt = self._build_system_prompt()
         print(
             f"[Engine] Initialized game {self.game_id[:8]} with agents: "
@@ -219,6 +220,8 @@ class Engine:
             reward=reward,
             winners=winners,
             winning_team=winning_team,
+            trainable_agent_id=self.trainable_agent_id,
+            emdash_counts=self.em_dash_counts.copy(),
         )
 
     async def run(self, input_queue: Queue, output_queue: Queue) -> None:
@@ -525,6 +528,8 @@ class Engine:
             )
             self.event_counter += 1
 
+            self._track_emdashes(aid, tool.question_or_statement)
+
             if tool.ask_directed_question_to_agent_id:
                 target = tool.ask_directed_question_to_agent_id
                 resp = cast(
@@ -546,6 +551,8 @@ class Engine:
                     )
                 )
                 self.event_counter += 1
+
+                self._track_emdashes(target, resp.response)
 
     def _handle_failed_election(self) -> None:
         top_card = self.deck.draw(1)[0]
@@ -675,6 +682,11 @@ class Engine:
         - Tool calls that trigger public events are public (PresidentPickChancellorTool, VoteChancellorYesNoTool, ChancellorPlayPolicyTool with the card you choose to play, ChooseAgentToVoteOutTool, AskAgentIfWantsToSpeakTool, AgentResponseToQuestionTool)
         - Note: referencing some other agent in your AskAgentIfWantsToSpeakTool or responding in AgentResponseToQuestionTool are completely public and should not be used for private communication
         """
+
+    def _track_emdashes(self, agent_id: str, text: str | None) -> None:
+        if not text:
+            return
+        self.em_dash_counts[agent_id] = self.em_dash_counts.get(agent_id, 0) + text.count("—")
 
     def _get_new_user_events_since_last_message(
         self, agent_id: str, action_prompt: str

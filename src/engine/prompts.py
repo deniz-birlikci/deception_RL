@@ -42,9 +42,6 @@ Impostors win if:
 - {num_security_cards} Security cards
 - {num_sabotage_cards} Sabotage cards
 - Shuffle at start; reshuffle discards when needed
-
-=== LYING & PROMOTION ===
-- Lying is legal and expected. Only the Master Impostor's promotion/ejection must be revealed immediately.
 """
 
 

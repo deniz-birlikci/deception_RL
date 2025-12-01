@@ -123,5 +123,11 @@ class EngineAPI:
             return None
         return getattr(engine, "trainable_agent_role", None)
 
+    def get_trainable_agent_id(self, game_id: str) -> str | None:
+        engine = self.engines.get(game_id)
+        if engine is None:
+            return None
+        return getattr(engine, "trainable_agent_id", None)
+
     def finalize(self, game_id: str, terminal_state: TerminalState) -> None:
         pass
